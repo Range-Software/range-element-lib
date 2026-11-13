@@ -9,6 +9,8 @@ qt_add_library(range-element-lib
         src/rel_tetra_mesh_options.cpp
         src/rel_tetra_mesh_refiner.cpp
         src/rel_tetra_mesher.cpp
+        src/rel_tetra_mesh_quality.cpp
+        src/rel_tetra_mesh_optimizer.cpp
 
         include/rel_boundary_recovery.h
         include/rel_delaunay_tetrahedralizer.h
@@ -18,6 +20,9 @@ qt_add_library(range-element-lib
         include/rel_tetra_mesh_options.h
         include/rel_tetra_mesh_refiner.h
         include/rel_tetra_mesher.h
+        include/rel_tetra_mesh_quality.h
+        include/rel_tetra_mesh_profile.h
+        include/rel_tetra_mesh_optimizer.h
 )
 
 # Exact geometric predicates rely on IEEE 754 arithmetic: a product and a sum must not be

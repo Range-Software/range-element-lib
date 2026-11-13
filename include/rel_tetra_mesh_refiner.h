@@ -6,6 +6,7 @@
 #include "rel_boundary_recovery.h"
 #include "rel_tetra_mesh.h"
 #include "rel_tetra_mesh_options.h"
+#include "rel_tetra_mesh_profile.h"
 
 //! Delaunay refinement of a tetrahedral mesh with recovered boundary.
 //!
@@ -60,6 +61,9 @@ class RTetraMeshRefiner
         uint64_t maxSteinerVertices;
         //! Whether the refinement was stopped before all tetrahedra were refined.
         bool stopped;
+        uint64_t spacingRejections = 0;
+        uint64_t boundaryRejections = 0;
+        RTetraMeshProfile profile;
 
     private:
 
@@ -82,6 +86,10 @@ class RTetraMeshRefiner
 
         //! Return whether the refinement was stopped before all tetrahedra were refined.
         bool getStopped() const;
+        uint64_t getSpacingRejections() const { return spacingRejections; }
+        uint64_t getBoundaryRejections() const { return boundaryRejections; }
+
+        const RTetraMeshProfile &getProfile() const { return profile; }
 
         //! Refine mesh.
         void refine();

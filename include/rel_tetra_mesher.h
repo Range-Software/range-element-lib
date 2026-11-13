@@ -3,6 +3,7 @@
 
 #include "rel_tetra_mesh_data.h"
 #include "rel_tetra_mesh_options.h"
+#include "rel_tetra_mesh_profile.h"
 
 //! Tetrahedral mesh generator.
 //!
@@ -24,6 +25,8 @@ class RTetraMesher
         //! Generate tetrahedral mesh.
         //! Throws RError if input is not valid or if mesh could not be generated.
         static void generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output);
+        //! Generate and optionally return phase timings and optimizer work counters.
+        static void generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *profile);
 
 };
 

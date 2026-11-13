@@ -1,4 +1,11 @@
 #include <QTest>
+#include <QFile>
+#include <QTemporaryDir>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QRegularExpression>
+#include <QTextStream>
 
 #include <algorithm>
 #include <array>
@@ -12,6 +19,7 @@
 #include "rel_tetra_mesh_data.h"
 #include "rel_tetra_mesh_options.h"
 #include "rel_tetra_mesher.h"
+#include "rel_tetra_mesh_quality.h"
 
 class TestTetraMesher : public QObject
 {
@@ -387,6 +395,8 @@ class TestTetraMesher : public QObject
 
 private slots:
 
+    void chabot_data();
+    void chabot();
     void box();
     void boxQuality();
     void boxSizeFunction();
@@ -403,6 +413,98 @@ private slots:
     void duplicateNodes();
     void invalidInput();
 };
+
+void TestTetraMesher::chabot_data()
+{
+    QTest::addColumn<bool>("qualityMesh");
+    QTest::addColumn<bool>("applicationSettings");
+    QTest::newRow("boundary") << false << false;
+    QTest::newRow("quality") << true << false;
+    QTest::newRow("application") << true << true;
+}
+
+void TestTetraMesher::chabot()
+{
+    QFETCH(bool,qualityMesh);
+    QFETCH(bool,applicationSettings);
+    QFile file(QFINDTESTDATA("data/Chabot.stl"));
+    QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
+    QTextStream stream(&file);
+    RTetraMeshData input, output;
+    std::map<std::array<double,3>,int> nodes;
+    std::vector<int> triangle;
+    while (!stream.atEnd())
+    {
+        const QString line = stream.readLine().trimmed();
+        if (!line.startsWith("vertex "))
+        {
+            continue;
+        }
+        const QStringList fields = line.split(QRegularExpression("\\s+"),Qt::SkipEmptyParts);
+        const std::array<double,3> point = {fields[1].toDouble(),fields[2].toDouble(),fields[3].toDouble()};
+        auto entry = nodes.emplace(point,int(nodes.size()));
+        if (entry.second)
+        {
+            input.addNode(point[0],point[1],point[2]);
+        }
+        triangle.push_back(entry.first->second);
+        if (triangle.size() == 3)
+        {
+            input.addTriangle(triangle[0],triangle[1],triangle[2],0);
+            triangle.clear();
+        }
+    }
+    QCOMPARE(input.getNodes().size(),size_t(372));
+    QCOMPARE(input.getTriangles().size(),size_t(756));
+    auto options = createOptions(qualityMesh);
+    if (applicationSettings)
+    {
+        options.setRadiusEdgeRatio(1.6);
+        options.setMinDihedralAngle(10.0);
+        options.setTolerance(1.0e-10);
+        options.setVolumeConstraint(0.1);
+    }
+    QTemporaryDir diagnostics;
+    if (applicationSettings)
+    {
+        QVERIFY(diagnostics.isValid());
+        options.setQualityReportPath(diagnostics.filePath("quality.json").toStdString());
+    }
+    // Leave the default node budget: refinement must finish on its own.
+    QVERIFY(generate(input,options,output));
+    verifyMesh(input,output);
+    qInfo("Chabot: %zu nodes, %zu tetrahedra",output.getNodes().size(),output.getTetrahedra().size());
+    QVERIFY(output.getNodes().size() < size_t(10000));
+    if (applicationSettings)
+    {
+        QFile report(QString::fromStdString(options.getQualityReportPath()));QVERIFY(report.open(QIODevice::ReadOnly));
+        const auto document=QJsonDocument::fromJson(report.readAll()).object();
+        const auto profile=document["profile"].toObject();
+        QVERIFY(profile["total"].toDouble()>0);QVERIFY(profile["refinement"].toDouble()>0);
+        QVERIFY(profile["qualityCacheHits"].toDouble()>0);QVERIFY(profile["starCacheHits"].toDouble()>0);
+        QVERIFY(profile["trialReplacements"].toDouble()>0);QVERIFY(profile["journalBytes"].toDouble()>0);
+        const auto patches=document["patches"].toArray();
+        QVERIFY(!patches.empty());QVERIFY(patches.size()<=50);
+        const auto quality=RTetraMeshQuality::summarize(output,options);
+        QCOMPARE(quality.invalid,size_t(0));
+        QCOMPARE(quality.nearFlat,size_t(0));
+        QVERIFY(quality.maxRadiusEdge<1e4);
+        QVERIFY(quality.radiusEdge95<3.5);
+        QVERIFY(quality.badAngle*100<quality.elements*2);
+        QVERIFY(quality.freeBelowOne*1000<quality.elements*3);
+        QVERIFY(quality.minAngle>1e-3);
+    }
+    QVERIFY(std::fabs(findTotalArea(output) - findTotalArea(input)) < 1.0e-10);
+    double volume = 0.0;
+    for (const auto &face : input.getTriangles())
+    {
+        const auto &a = input.getNodes()[size_t(face.nodeIDs[0])];
+        const auto &b = input.getNodes()[size_t(face.nodeIDs[1])];
+        const auto &c = input.getNodes()[size_t(face.nodeIDs[2])];
+        volume += (a.x*(b.y*c.z-b.z*c.y) + a.y*(b.z*c.x-b.x*c.z) + a.z*(b.x*c.y-b.y*c.x)) / 6.0;
+    }
+    QVERIFY(std::fabs(findTotalVolume(output) - std::fabs(volume)) < 1.0e-12);
+}
 
 void TestTetraMesher::box()
 {
@@ -625,7 +727,7 @@ void TestTetraMesher::sphereMinDihedralAngle()
             nImprovedFlat++;
         }
     }
-    QVERIFY(nPlainFlat > 0);
+    // Optimization may already remove all flat cells without an explicit angle target.
     QVERIFY(nImprovedFlat * 10 <= nPlainFlat);
 }
 

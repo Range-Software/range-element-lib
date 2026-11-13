@@ -1,6 +1,8 @@
 #ifndef REL_TETRA_MESH_OPTIONS_H
 #define REL_TETRA_MESH_OPTIONS_H
 
+#include <string>
+
 //! Options of the tetrahedral mesh generator.
 class RTetraMeshOptions
 {
@@ -26,6 +28,7 @@ class RTetraMeshOptions
         double tolerance;
         //! Maximum number of nodes the generator may add, zero if it is not limited.
         unsigned int maxSteinerNodes;
+        std::string qualityReportPath;
 
     public:
 
@@ -85,6 +88,10 @@ class RTetraMeshOptions
 
         //! Set maximum number of added nodes.
         void setMaxSteinerNodes(unsigned int maxSteinerNodes);
+
+        //! Optional JSON diagnostic export. Empty means no file is written.
+        const std::string &getQualityReportPath() const { return qualityReportPath; }
+        void setQualityReportPath(const std::string &path) { qualityReportPath=path; }
 
 };
 

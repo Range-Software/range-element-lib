@@ -15,6 +15,8 @@
 #include "rel_tetra_mesh.h"
 #include "rel_tetra_mesh_refiner.h"
 #include "rel_tetra_mesher.h"
+#include "rel_tetra_mesh_optimizer.h"
+#include "rel_tetra_mesh_quality.h"
 
 namespace
 {
@@ -170,6 +172,13 @@ namespace
 
 void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output)
 {
+    generate(input,options,output,nullptr);
+}
+
+void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *resultProfile)
+{
+    RTetraMeshProfile profile;
+    RTetraMeshProfile::Timer totalTimer(profile.total);
     const std::vector<RTetraMeshData::Node> &rInputNodes = input.getNodes();
     const int nInputNodes = int(rInputNodes.size());
     const bool reconstruct = options.getReconstruct() && !input.getTetrahedra().empty();
@@ -205,7 +214,8 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
 
     std::vector<int> duplicates;
-    RDelaunayTetrahedralizer::tetrahedralize(mesh,duplicates);
+    { RTetraMeshProfile::Timer timer(profile.tetrahedralization);
+      RDelaunayTetrahedralizer::tetrahedralize(mesh,duplicates); }
 
     std::vector<int> nodeMap(static_cast<size_t>(nInputNodes));
     int nDuplicates = 0;
@@ -224,6 +234,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     // Boundary.
 
+    RTetraMeshProfile::Timer boundaryTimer(profile.boundary);
     RBoundaryRecovery boundary(mesh,options.getTolerance());
     boundary.setMinLength(minLengthRatio * modelSize);
 
@@ -284,10 +295,15 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Triangles do not enclose any volume.");
     }
 
+    boundaryTimer.finish();
+    RTetraMeshOptimizer optimizer(mesh,boundary,options);
+    { RTetraMeshProfile::Timer timer(profile.initialRepair);optimizer.optimize(false); }
+
     // Refinement.
 
     if (options.getQualityMesh())
     {
+        RTetraMeshProfile::Timer refinementTimer(profile.refinement);
         if (options.getVerbose())
         {
             RLogger::info("Refining mesh.\n");
@@ -300,6 +316,12 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         refiner.setMinLength(minLengthRatio * modelSize);
         refiner.setMaxSteinerVertices(maxSteinerNodes);
         refiner.refine();
+        profile.addWork(refiner.getProfile());
+        if (options.getVerbose())
+        {
+            RLogger::info("Refinement safeguards rejected %llu interior insertions and %llu boundary splits; constrained cells may remain below requested quality.\n",
+                          static_cast<unsigned long long>(refiner.getSpacingRejections()),static_cast<unsigned long long>(refiner.getBoundaryRejections()));
+        }
 
         if (refiner.getStopped())
         {
@@ -313,6 +335,13 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         {
             throw RError(RError::Type::Application,R_ERROR_REF,"Boundary was lost during mesh refinement.");
         }
+    }
+
+    if (options.getQualityMesh())
+    {
+        if (options.getVerbose()) RLogger::info("Optimizing mesh with bounded patch repairs.\n");
+        RTetraMeshProfile::Timer timer(profile.optimization);
+        optimizer.optimize();
     }
 
     // Output.
@@ -429,6 +458,38 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         {
             output.addEdge(rSegment.v[0],rSegment.v[1],rSegment.marker);
         }
+    }
+
+    profile.addWork(optimizer.getProfile());
+    RTetraMeshQuality::Summary quality;
+    { RTetraMeshProfile::Timer timer(profile.diagnostics);quality=RTetraMeshQuality::summarize(output,options); }
+    totalTimer.finish(); // Excludes optional report serialization and logging.
+    if (!options.getQualityReportPath().empty())
+    {
+        const RTetraMeshQuality::Work work={optimizer.getQueueVisits(),optimizer.getBudgetStops(),optimizer.getInsertedPoints(),optimizer.getOrderedVisits(),optimizer.getBoundaryPoints(),&profile};
+        RTetraMeshQuality::writeReport(output,options,optimizer.getPatchAttempts(),options.getQualityReportPath(),&work);
+    }
+    if (resultProfile) *resultProfile=profile;
+    if (options.getVerbose())
+    {
+        RLogger::info("Mesh phases (s): tetrahedralization %.3f, boundary %.3f, initial repair %.3f, refinement %.3f, optimization %.3f, diagnostics %.3f, total %.3f.\n",
+                      profile.tetrahedralization,profile.boundary,profile.initialRepair,profile.refinement,profile.optimization,profile.diagnostics,profile.total);
+        RLogger::info("Mesh work: %llu quality measurements, %llu quality cache hits, %llu star searches, %llu star cache hits, %llu local trial replacements.\n",
+                      static_cast<unsigned long long>(profile.qualityMeasurements),static_cast<unsigned long long>(profile.qualityCacheHits),
+                      static_cast<unsigned long long>(profile.starQueries),static_cast<unsigned long long>(profile.starCacheHits),static_cast<unsigned long long>(profile.trialReplacements));
+        RLogger::info("Volume optimization visited %llu local cell patches, accepted %llu off-centers and reached %llu queue budgets.\n",
+                      static_cast<unsigned long long>(optimizer.getQueueVisits()),static_cast<unsigned long long>(optimizer.getInsertedPoints()),static_cast<unsigned long long>(optimizer.getBudgetStops()));
+        RLogger::info("Sub-degree angles: %llu elements have internal face pairs, %llu have prescribed face pairs (counts may overlap).\n",
+                      static_cast<unsigned long long>(quality.freeBelowOne),static_cast<unsigned long long>(quality.prescribedBelowOne));
+        RLogger::info("Mesh quality: minimum dihedral = %g degrees, radius/edge p95 = %g, maximum = %g, nearly flat = %llu.\n",
+                      quality.minAngle,quality.radiusEdge95,quality.maxRadiusEdge,static_cast<unsigned long long>(quality.nearFlat));
+    }
+    if (options.getQualityMesh() && !quality.targetsMet())
+    {
+        RLogger::warning("Mesh quality targets remain unmet: %llu radius/edge, %llu dihedral, %llu volume/size, %llu nearly flat, %llu invalid elements (%llu elements have geometry-constrained angles).\n",
+                         static_cast<unsigned long long>(quality.badRadius),static_cast<unsigned long long>(quality.badAngle),
+                         static_cast<unsigned long long>(quality.tooLarge),static_cast<unsigned long long>(quality.nearFlat),
+                         static_cast<unsigned long long>(quality.invalid),static_cast<unsigned long long>(quality.constrainedAngle));
     }
 
     if (options.getVerbose())

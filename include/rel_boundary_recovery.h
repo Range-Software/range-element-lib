@@ -21,6 +21,7 @@
 //! The tetrahedralization is therefore Delaunay everywhere but close to the boundary.
 class RBoundaryRecovery
 {
+    friend class RTetraMeshOptimizer;
 
     public:
 
@@ -154,6 +155,9 @@ class RBoundaryRecovery
         std::vector<unsigned char> boundaryVertices;
         //! Required mesh size at each vertex, used only if positive.
         std::vector<double> vertexSizes;
+        //! Insertion scale and input-feature ancestry, retained across boundary splits.
+        std::vector<double> insertionRadii;
+        std::vector<std::vector<int>> vertexParents;
 
         //! Marks of subfaces which are being replaced, such subfaces do not block a cavity.
         std::vector<unsigned int> replacedMarks;
@@ -172,6 +176,8 @@ class RBoundaryRecovery
         std::vector<int> createdTetras;
 
     private:
+
+        void copyState(const RBoundaryRecovery &source);
 
         //! Add subsegment, or set its marker if it exists. Return its position.
         int addSubSegment(int a, int b, int marker);
@@ -209,13 +215,11 @@ class RBoundaryRecovery
         std::vector<LoopEdge> findLoopEdges(const std::vector<int> &removedFaceIDs, uint64_t exceptKey);
 
         //! Find cavity of the mesh for a vertex which replaces given subfaces and splits edge (a,b), if given.
-        bool findBoundaryCavity(const double *p, const std::vector<int> &removedFaceIDs, int a, int b, int locatedTetraID);
+        bool findBoundaryCavity(const double *p, const std::vector<int> &removedFaceIDs, int a, int b, int locatedTetraID, bool exactVisibility);
 
         //! Return subsegment which would be removed if the current cavity of the mesh would be filled, -1 if there is none.
         int findLostSubSegment(int exceptSegmentID) const;
 
-        //! Return distance of a point from the closest vertex of the current cavity of the mesh.
-        double findCavityRadius(const double *p) const;
 
         //! Flip an edge shared by two subfaces if it is allowed by given mode.
         //! Vertices opposite to the edge are returned.
@@ -233,6 +237,8 @@ class RBoundaryRecovery
         //! Replace each subface at an edge by two subfaces with a vertex on the edge.
         void splitEdgeFaces(int a, int b, int vertexID, std::vector<uint64_t> &edgeStack);
 
+        bool splitSubFaceAt(int faceID, double minRadius, bool centroid);
+
         //! Recover subface which is missing in the tetrahedralization.
         void recoverSubFace(int faceID);
 
@@ -241,6 +247,8 @@ class RBoundaryRecovery
         //! Constructor.
         //! All points of the mesh are taken as input vertices.
         RBoundaryRecovery(RTetraMesh &mesh, double tolerance);
+        //! Independent trial state bound to a cloned mesh (callbacks never refer to the source).
+        RBoundaryRecovery(RTetraMesh &mesh, const RBoundaryRecovery &source);
 
         //! Set length below which nothing is split.
         void setMinLength(double minLength);
@@ -262,6 +270,8 @@ class RBoundaryRecovery
 
         //! Return type of a vertex.
         VertexType getVertexType(int vertexID) const;
+        //! Also covers an interior vertex subsequently adopted by a recovered facet.
+        bool isBoundaryVertex(int vertexID) const { return boundaryVertices[size_t(vertexID)]!=0; }
 
         //! Add triangle of the boundary.
         void addTriangle(int a, int b, int c, int marker);
@@ -301,12 +311,18 @@ class RBoundaryRecovery
         //! Return false if there is none.
         bool prepareVolumeCavity(const double *p, int seedTetraID);
 
+        //! Return distance of a point from the closest vertex of the current cavity of the mesh.
+        double findCavityRadius(const double *p) const;
+
         //! Find subsegment or subface which would be removed or which would be too close to a point,
         //! if the point would be inserted to the current cavity of the mesh.
         Encroachment findEncroachment(const double *p) const;
 
         //! Insert point to the current cavity of the mesh and return its position.
-        int insertCavityPoint(const double *p, VertexType type);
+        int insertCavityPoint(const double *p, VertexType type, double radius = 0.0, const std::vector<int> &parents = {});
+
+        //! Protect insertion history on the same/adjacent feature, as well as the current refinement scale.
+        bool insertionAllowed(const double *p, VertexType type, double minRadius, const std::vector<int> &parents = {}) const;
 
         //! Split subsegment by a new vertex. Return false if it could not be split,
         //! or if the new vertex would be closer than minRadius to another one.

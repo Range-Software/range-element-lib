@@ -1,6 +1,7 @@
 #ifndef REL_TETRA_MESH_H
 #define REL_TETRA_MESH_H
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -102,6 +103,9 @@ class RTetraMesh
 
     private:
 
+        struct ReplacementUndo;
+        bool replaceTetrasImpl(const std::vector<int> &, const std::vector<std::array<int,4>> &, ReplacementUndo *);
+
         //! Return position of a new tetrahedron.
         int allocateTetra();
 
@@ -198,11 +202,13 @@ class RTetraMesh
         //! true are not crossed and never end inside of the cavity.
         //! Tetrahedra are then removed from the cavity until the point can see its whole boundary,
         //! so that all new tetrahedra have a positive volume.
+        //! If exactVisibility is true, accept all strictly positive heights, including those below the coplanarity margin.
         //! Return false if there is no such cavity. Then the mesh can not be changed by fillCavity().
         bool findCavity(const double *p,
                         int seedTetraID,
                         const std::vector<int> *pForcedTetras = nullptr,
-                        const std::function<bool(int,int)> *pIsBlocked = nullptr);
+                        const std::function<bool(int,int)> *pIsBlocked = nullptr,
+                        bool exactVisibility = false);
 
         //! Return tetrahedra of the last found cavity.
         const std::vector<int> &getCavityTetras() const;
@@ -228,6 +234,33 @@ class RTetraMesh
         //! Return false if a vertex with the same coordinates exists, or if the point is too close to
         //! a vertex to form tetrahedra with it. Position of that vertex is then set to duplicateID.
         bool insertVertex(int pointID, int hintTetraID, int &duplicateID);
+
+        //! Replace a finite, single-region cluster atomically. The oriented boundary must be identical.
+        //! Invalid/nonmanifold proposals leave the mesh unchanged.
+        bool replaceTetras(const std::vector<int> &oldIDs, const std::vector<std::array<int,4>> &vertices);
+
+        //! Scoped, nestable speculative replacements. Does not support point insertion
+        //! or other mesh mutations while active. Rolls back every successful replacement.
+        class ReplacementTrial
+        {
+            RTetraMesh &mesh;
+            std::vector<ReplacementUndo *> undo;
+            size_t bytes=0;
+        public:
+            explicit ReplacementTrial(RTetraMesh &mesh):mesh(mesh){}
+            ~ReplacementTrial();
+            ReplacementTrial(const ReplacementTrial &)=delete;
+            ReplacementTrial &operator=(const ReplacementTrial &)=delete;
+            bool replace(const std::vector<int> &, const std::vector<std::array<int,4>> &);
+            void rollback();
+            size_t bytesSaved() const { return bytes; }
+        };
+
+        //! Logical storage copied by a trial snapshot, excluding allocator overhead.
+        size_t storageBytes() const;
+
+        //! Move an interior point after the caller has validated its complete star.
+        void setPoint(int pointID, const double *p);
 
         //! Find all tetrahedra sharing a vertex.
         void findStar(int pointID, std::vector<int> &star) const;

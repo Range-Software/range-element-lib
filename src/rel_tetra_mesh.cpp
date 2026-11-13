@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <set>
 
 #include <rbl_error.h>
 
@@ -474,7 +476,7 @@ int RTetraMesh::findDuplicateVertex(int tetraID, const double *p) const
     return -1;
 }
 
-bool RTetraMesh::findCavity(const double *p, int seedTetraID, const std::vector<int> *pForcedTetras, const std::function<bool(int,int)> *pIsBlocked)
+bool RTetraMesh::findCavity(const double *p, int seedTetraID, const std::vector<int> *pForcedTetras, const std::function<bool(int,int)> *pIsBlocked, bool exactVisibility)
 {
     this->cavityTetras.clear();
     this->cavityFaces.clear();
@@ -583,9 +585,17 @@ bool RTetraMesh::findCavity(const double *p, int seedTetraID, const std::vector<
                         removeID = removeID == tetraID ? neighborID : tetraID;
                     }
                 }
-                else if (finite && !(this->findOrientation(this->getPoint(a),this->getPoint(b),this->getPoint(c),p) > 0.0))
+                else if (finite)
                 {
-                    removeID = tetraID;
+                    // Recovery must allow small positive heights to make progress.
+                    // Refinement keeps the coplanarity margin to avoid thin tetrahedra.
+                    const double side = exactVisibility
+                        ? RGeometricPredicates::orient3d(this->getPoint(a),this->getPoint(b),this->getPoint(c),p)
+                        : this->findOrientation(this->getPoint(a),this->getPoint(b),this->getPoint(c),p);
+                    if (!(side > 0.0))
+                    {
+                        removeID = tetraID;
+                    }
                 }
                 if (removeID == noTetra)
                 {
@@ -937,4 +947,194 @@ bool RTetraMesh::findFace(int a, int b, int c, Face &face) const
         }
     }
     return false;
+}
+
+void RTetraMesh::setPoint(int pointID, const double *p)
+{
+    std::copy(p,p+3,this->points[size_t(pointID)].x);
+}
+
+struct RTetraMesh::ReplacementUndo
+{
+    bool captured=false;
+    size_t slotCount=0,freeSize=0;
+    uint64_t count;
+    int last;
+    unsigned int cavityStamp;
+    std::vector<std::pair<int,Tetra>> tetras;
+    std::vector<std::pair<int,int>> vertices;
+    std::vector<int> freeTail,created,cavity;
+    std::vector<Face> faces;
+    std::vector<FaceLink> links;
+    size_t bytes() const
+    {
+        return sizeof(*this)+tetras.size()*sizeof(tetras[0])+vertices.size()*sizeof(vertices[0])
+            +(freeTail.size()+created.size()+cavity.size())*sizeof(int)+faces.size()*sizeof(Face)+links.size()*sizeof(FaceLink);
+    }
+};
+
+size_t RTetraMesh::storageBytes() const
+{
+    return sizeof(*this)+points.size()*sizeof(Point)+tetras.size()*sizeof(Tetra)
+        +(freeTetras.size()+vertexTetras.size()+starBuffer.size()+cavityTetras.size()+createdTetras.size())*sizeof(int)
+        +(cavityMarks.size()+starMarks.size())*sizeof(unsigned int)+cavityFaces.size()*sizeof(Face)+cavityLinks.size()*sizeof(FaceLink);
+}
+
+RTetraMesh::ReplacementTrial::~ReplacementTrial() { rollback(); }
+bool RTetraMesh::ReplacementTrial::replace(const std::vector<int> &oldIDs,const std::vector<std::array<int,4>> &vertices)
+{
+    undo.reserve(undo.size()+1);
+    auto record=new ReplacementUndo;
+    undo.push_back(record);
+    try
+    {
+        if (!mesh.replaceTetrasImpl(oldIDs,vertices,record)) { undo.pop_back();delete record;return false; }
+    }
+    catch (...) { rollback();throw; }
+    bytes+=record->bytes();return true;
+}
+void RTetraMesh::ReplacementTrial::rollback()
+{
+    for (auto it=undo.rbegin();it!=undo.rend();++it)
+    {
+        auto &u=**it;
+        if (!u.captured) { delete *it;continue; }
+        for (const auto &t:u.tetras) mesh.tetras[size_t(t.first)]=t.second;
+        mesh.tetras.resize(u.slotCount);mesh.cavityMarks.resize(u.slotCount);mesh.starMarks.resize(u.slotCount);
+        mesh.freeTetras.resize(u.freeSize);
+        std::copy(u.freeTail.begin(),u.freeTail.end(),mesh.freeTetras.end()-u.freeTail.size());
+        for (const auto &v:u.vertices) mesh.vertexTetras[size_t(v.first)]=v.second;
+        mesh.nTetras=u.count;mesh.lastTetra=u.last;mesh.cavityStamp=u.cavityStamp;
+        mesh.createdTetras=std::move(u.created);mesh.cavityTetras=std::move(u.cavity);
+        mesh.cavityFaces=std::move(u.faces);mesh.cavityLinks=std::move(u.links);
+        mesh.starBuffer.clear();
+        delete *it;
+    }
+    undo.clear();
+}
+
+bool RTetraMesh::replaceTetras(const std::vector<int> &oldIDs,const std::vector<std::array<int,4>> &vertices)
+{
+    return replaceTetrasImpl(oldIDs,vertices,nullptr);
+}
+
+bool RTetraMesh::replaceTetrasImpl(const std::vector<int> &oldIDs, const std::vector<std::array<int,4>> &vertices, ReplacementUndo *undo)
+{
+    using Key = std::array<int,3>;
+    struct Entry { int count = 0; int sign = 0; int outside = -1; int side = -1; };
+    auto keyOf = [](const int *v, int f, int &sign) {
+        Key key = {v[faceVertices[f][0]],v[faceVertices[f][1]],v[faceVertices[f][2]]};
+        sign = 1;
+        for (int i=0;i<3;i++) for (int j=i+1;j<3;j++) if (key[i]>key[j]) sign = -sign;
+        std::sort(key.begin(),key.end());
+        return key;
+    };
+    if (oldIDs.empty() || vertices.empty()) return false;
+    for (int id : oldIDs) if (id<0 || id>=this->getNTetraSlots()) return false;
+    const std::set<int> oldSet(oldIDs.begin(),oldIDs.end());
+    if (oldSet.size()!=oldIDs.size()) return false;
+    std::map<Key,Entry> boundary, proposed;
+    std::set<int> oldPoints,newPoints;
+    int region = this->getTetra(oldIDs.front()).region;
+    for (int id : oldIDs)
+    {
+        if (!this->isAlive(id) || this->isGhost(id) || this->getTetra(id).region!=region) return false;
+        const Tetra &t=this->getTetra(id);
+        oldPoints.insert(t.v,t.v+4);
+        for (int f=0;f<4;f++) if (!oldSet.count(t.n[f]))
+        {
+            int sign; Key key=keyOf(t.v,f,sign);
+            Entry &e=boundary[key];
+            if (++e.count!=1) return false;
+            e.sign=sign; e.outside=t.n[f];
+            const Tetra &n=this->getTetra(t.n[f]);
+            for (int j=0;j<4;j++) if (n.n[j]==id) e.side=j;
+            if (e.side<0) return false;
+        }
+    }
+    std::set<std::array<int,4>> unique;
+    for (const auto &v : vertices)
+    {
+        auto sorted=v; std::sort(sorted.begin(),sorted.end());
+        if (sorted[0]<0 || sorted[3]>=this->getNPoints() || std::adjacent_find(sorted.begin(),sorted.end())!=sorted.end()
+            || !unique.insert(sorted).second) return false;
+        if (!(RGeometricPredicates::orient3d(this->getPoint(v[0]),this->getPoint(v[1]),this->getPoint(v[2]),this->getPoint(v[3]))>0.0)) return false;
+        newPoints.insert(v.begin(),v.end());
+        for (int f=0;f<4;f++)
+        {
+            int sign; Key key=keyOf(v.data(),f,sign);
+            Entry &e=proposed[key]; e.count++; e.sign+=sign;
+            if (e.count>2) return false;
+            if (!boundary.count(key))
+            {
+                Face existing;
+                if (this->findFace(key[0],key[1],key[2],existing) && !oldSet.count(existing.tetra)) return false;
+            }
+        }
+    }
+    if (oldPoints!=newPoints) return false;
+    for (const auto &item : proposed)
+    {
+        auto b=boundary.find(item.first);
+        if (item.second.count==1)
+        {
+            if (b==boundary.end() || b->second.sign!=item.second.sign) return false;
+        }
+        else if (item.second.sign!=0 || b!=boundary.end()) return false;
+    }
+    for (const auto &item : boundary) if (!proposed.count(item.first)) return false;
+
+    // All checks precede mutation. Only save slots and vertex hints touched by
+    // this patch; the free list is a stack, so only its consumed tail is needed.
+    if (undo)
+    {
+        undo->slotCount=tetras.size();undo->freeSize=freeTetras.size();undo->count=nTetras;
+        undo->last=lastTetra;undo->cavityStamp=cavityStamp;
+        undo->created=createdTetras;undo->cavity=cavityTetras;undo->faces=cavityFaces;undo->links=cavityLinks;
+        const size_t reused=std::min(vertices.size(),freeTetras.size());
+        undo->freeTail.assign(freeTetras.end()-reused,freeTetras.end());
+        std::set<int> saved=oldSet;
+        saved.insert(undo->freeTail.begin(),undo->freeTail.end());
+        for (const auto &b:boundary) saved.insert(b.second.outside);
+        for (int id:saved) undo->tetras.emplace_back(id,tetras[size_t(id)]);
+        for (int point:oldPoints) undo->vertices.emplace_back(point,vertexTetras[size_t(point)]);
+        undo->captured=true;
+    }
+    // Allocate before releasing old slots.
+    this->createdTetras.clear();
+    std::map<Key,Face> links;
+    for (const auto &v : vertices)
+    {
+        const int id=this->allocateTetra();
+        Tetra &t=this->tetras[size_t(id)]; std::copy(v.begin(),v.end(),t.v); t.region=region;
+        this->createdTetras.push_back(id);
+        for (int f=0;f<4;f++)
+        {
+            int sign; Key key=keyOf(v.data(),f,sign);
+            auto b=boundary.find(key);
+            if (b!=boundary.end())
+            {
+                t.n[f]=b->second.outside;
+                this->tetras[size_t(b->second.outside)].n[b->second.side]=id;
+            }
+            else
+            {
+                auto e=links.emplace(key,Face{id,f});
+                if (!e.second)
+                {
+                    t.n[f]=e.first->second.tetra;
+                    this->tetras[size_t(e.first->second.tetra)].n[e.first->second.face]=id;
+                }
+            }
+        }
+        for (int point : v) this->vertexTetras[size_t(point)]=id;
+    }
+    for (int id : oldIDs)
+    {
+        this->tetras[size_t(id)].v[0]=deadVertex; this->freeTetras.push_back(id); this->nTetras--;
+    }
+    this->lastTetra=this->createdTetras.front();
+    this->cavityStamp+=4;
+    this->cavityTetras.clear(); this->cavityFaces.clear(); this->cavityLinks.clear();
+    return true;
 }

@@ -11,6 +11,7 @@ set(range_element_lib_tests
     tst_geometric_predicates
     tst_delaunay_tetrahedralizer
     tst_tetra_mesher
+    tst_tetra_mesh_optimizer
 )
 
 foreach(test_name IN LISTS range_element_lib_tests)
@@ -22,3 +23,6 @@ foreach(test_name IN LISTS range_element_lib_tests)
     )
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
+
+# Fail non-converging refinement regressions instead of leaving CI running.
+set_tests_properties(tst_tetra_mesher PROPERTIES TIMEOUT 60)
