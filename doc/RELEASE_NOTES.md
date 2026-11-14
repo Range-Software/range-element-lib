@@ -34,18 +34,15 @@ triangulated surface.
   scans and optimization sweeps report percentage progress; adaptive queues pulse
   with work counts. Updates are throttled, status text is mirrored to the log without
   percentages, and progress is finalized on success or exception
-
-### Bug fixes
-
 - **RBoundaryRecovery** can adopt a bounded planar patch's triangulation from the
   tetrahedral mesh before adding more vertices. The replacement is committed only
   after checking the patch boundary, constrained edges, vertex set, area, orientation
-  and surface marker. This avoids repeated subdivision to the minimum split size
-  when a valid planar patch has a different triangulation in the volume mesh
+  and surface marker, allowing a valid planar patch to use the triangulation
+  already present in the volume mesh
 - Boundary recovery retries a failed circumcenter placement at the triangle centroid
-  for additional rejection paths, including an existing vertex or an unusable facet
-  location. Quality-refinement spacing and size safeguards remain in force
+  when placement is blocked by an existing vertex, an unusable facet location or an
+  invalid cavity. Quality refinement enforces spacing and size safeguards
 - Boundary recovery errors identify the actual split rejection, face or edge and node
   identifiers, marker, full-precision coordinates, circumradius or edge length, and
-  minimum split length. A recovery failure is no longer presented as evidence of a
-  surface intersection
+  minimum split length. Diagnostics distinguish recovery failures from detected
+  surface intersections
