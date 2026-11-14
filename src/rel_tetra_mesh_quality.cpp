@@ -58,14 +58,41 @@ RTetraMeshQuality::Element RTetraMeshQuality::measure(const double *a,const doub
         normals[i]=cross(sub(q[f[1]].data(),q[f[0]].data()),sub(q[f[2]].data(),q[f[0]].data()));
     }
     result.minAngle=180.0; result.minFreeAngle=180.0; result.maxAngle=0.0;
-    for (int i=0;i<4;i++) for (int j=i+1;j<4;j++)
+    // Sine and cosine of each dihedral angle, scaled by lengths of both normals.
+    double sines[6],cosines[6],angles[6];bool known[6]={},isFree[6];
+    int pairs=0;
+    for (int i=0;i<4;i++) for (int j=i+1;j<4;j++,pairs++)
     {
-        // atan2 retains tiny nonzero angles which acos rounds to zero.
         const V product=cross(normals[i],normals[j]);
-        const double angle=std::atan2(std::sqrt(dot(product,product)),-dot(normals[i],normals[j]))*180.0/std::acos(-1.0);
-        result.minAngle=std::min(result.minAngle,angle); result.maxAngle=std::max(result.maxAngle,angle);
-        if (!prescribedFaces || !prescribedFaces[i] || !prescribedFaces[j]) result.minFreeAngle=std::min(result.minFreeAngle,angle);
+        sines[pairs]=std::sqrt(dot(product,product));cosines[pairs]=-dot(normals[i],normals[j]);
+        isFree[pairs]=!prescribedFaces || !prescribedFaces[i] || !prescribedFaces[j];
     }
+    static const double pi=std::acos(-1.0);
+    auto angle=[&](int i) {
+        // atan2 retains tiny nonzero angles which acos rounds to zero.
+        if (!known[i]) { angles[i]=std::atan2(sines[i],cosines[i])*180.0/pi;known[i]=true; }
+        return angles[i];
+    };
+    // Angles lie between 0 and 180 degrees, so sin(a-b) orders them. Only the extreme angle
+    // and those which rounding cannot tell from it are evaluated; the margin is far
+    // above the rounding error, which keeps the result equal to comparing all six.
+    auto extreme=[&](bool freeOnly,double sign,double start) {
+        int best=-1;
+        auto difference=[&](int i,int j) { return sign*(sines[i]*cosines[j]-cosines[i]*sines[j]); };
+        for (int i=0;i<6;i++) if ((!freeOnly || isFree[i]) && (best<0 || difference(i,best)<0.0)) best=i;
+        if (best<0) return start;
+        double value=angle(best);
+        for (int i=0;i<6;i++)
+        {
+            if (i==best || (freeOnly && !isFree[i])) continue;
+            const double first=sines[i]*cosines[best],second=cosines[i]*sines[best];
+            if (!(sign*(first-second)>1e-12*(std::fabs(first)+std::fabs(second))+1e-290)) value=sign>0?std::min(value,angle(i)):std::max(value,angle(i));
+        }
+        return value;
+    };
+    result.minAngle=extreme(false,1.0,180.0);
+    result.maxAngle=extreme(false,-1.0,0.0);
+    result.minFreeAngle=prescribedFaces?std::min(180.0,extreme(true,1.0,180.0)):result.minAngle;
     return result;
 }
 
@@ -295,6 +322,7 @@ void RTetraMeshQuality::writeReport(const RTetraMeshData &data,const RTetraMeshO
             {"journalBytes",double(p.journalBytes)},
             {"trialReplacements",double(p.trialReplacements)},
             {"queueSkips",double(p.queueSkips)},
+            {"delaunaySkips",double(p.delaunaySkips)},
             {"acceptedChanges",double(p.acceptedChanges)}
         };
     }

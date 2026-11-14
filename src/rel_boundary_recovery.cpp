@@ -1722,12 +1722,27 @@ const std::vector<RBoundaryRecovery::SubFace> &RBoundaryRecovery::getSubFaces() 
 
 int RBoundaryRecovery::findSubSegment(int a, int b) const
 {
+    // Most queried edges have a vertex inside of a volume, which no subsegment has.
+    if (a < 0 || b < 0
+        || (size_t(a) < this->boundaryVertices.size() && !this->boundaryVertices[size_t(a)])
+        || (size_t(b) < this->boundaryVertices.size() && !this->boundaryVertices[size_t(b)]))
+    {
+        return -1;
+    }
     auto iter = this->segmentMap.find(findEdgeKey(a,b));
     return iter == this->segmentMap.end() ? -1 : iter->second;
 }
 
 int RBoundaryRecovery::findSubFace(int a, int b, int c) const
 {
+    // Most queried faces have a vertex inside of a volume, which no subface has.
+    if (a < 0 || b < 0 || c < 0
+        || (size_t(a) < this->boundaryVertices.size() && !this->boundaryVertices[size_t(a)])
+        || (size_t(b) < this->boundaryVertices.size() && !this->boundaryVertices[size_t(b)])
+        || (size_t(c) < this->boundaryVertices.size() && !this->boundaryVertices[size_t(c)]))
+    {
+        return -1;
+    }
     FaceKey key = {{a,b,c}};
     std::sort(key.v,key.v+3);
     auto iter = this->faceMap.find(key);

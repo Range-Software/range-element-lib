@@ -30,6 +30,15 @@ RTetraMeshQuality::Element uncachedElement(const RTetraMesh &mesh,const RBoundar
     }
     return RTetraMeshQuality::measure(p[0],p[1],p[2],p[3],fixed);
 }
+//! Sort and remove repeated keys: the order and content of an ordered set, without its nodes.
+template <typename T> void makeUnique(std::vector<T> &keys)
+{
+    std::sort(keys.begin(),keys.end());keys.erase(std::unique(keys.begin(),keys.end()),keys.end());
+}
+inline bool hasVertex(const int *v,int vertex)
+{
+    return v[0]==vertex || v[1]==vertex || v[2]==vertex || v[3]==vertex;
+}
 double qualityScore(const RTetraMeshQuality::Element &q)
 {
     return std::min({q.meanRatio,1.0/(1.0+q.radiusEdge*q.radiusEdge),q.minFreeAngle/180.0});
@@ -52,10 +61,11 @@ RTetraMeshQuality::Element RTetraMeshOptimizer::element(const RTetraMesh &m,cons
         if (size_t(v[i])>=geometryRevision.size()) { profile.qualityMeasurements++;return uncachedElement(m,b,v); }
         stamp=std::max(stamp,geometryRevision[size_t(v[i])]);
     }
-    if (qualityCache.size()>=262144) qualityCache.clear();
-    const std::array<int,4> key={v[0],v[1],v[2],v[3]};auto &entry=qualityCache[key];
-    if (entry.stamp==stamp && entry.boundaryEpoch==boundaryEpoch) { profile.qualityCacheHits++;return entry.value; }
-    profile.qualityMeasurements++;entry.stamp=stamp;entry.boundaryEpoch=boundaryEpoch;
+    const size_t cacheSize=65536;
+    if (qualityCache.empty()) qualityCache.resize(cacheSize);
+    const std::array<int,4> key={v[0],v[1],v[2],v[3]};auto &entry=qualityCache[KeyHash()(key)&(cacheSize-1)];
+    if (entry.key==key && entry.stamp==stamp && entry.boundaryEpoch==boundaryEpoch) { profile.qualityCacheHits++;return entry.value; }
+    profile.qualityMeasurements++;entry.key=key;entry.stamp=stamp;entry.boundaryEpoch=boundaryEpoch;
     return entry.value=uncachedElement(m,b,v);
 }
 
@@ -68,17 +78,25 @@ void RTetraMeshOptimizer::findStar(int point,std::vector<int> &star) const
     starCache[size_t(point)]=star;starCacheStamp[size_t(point)]=vertexRevision[size_t(point)];
 }
 
+const std::vector<int> &RTetraMeshOptimizer::starOf(int point) const
+{
+    starCache.resize(size_t(mesh.getNPoints()));starCacheStamp.resize(size_t(mesh.getNPoints()),0);
+    auto &star=starCache[size_t(point)];
+    if (starCacheStamp[size_t(point)]==vertexRevision[size_t(point)]) { profile.starCacheHits++;return star; }
+    profile.starQueries++;mesh.findStar(point,star);
+    starCacheStamp[size_t(point)]=vertexRevision[size_t(point)];
+    return star;
+}
+
 int RTetraMeshOptimizer::findEdge(int a,int b) const
 {
-    std::vector<int> star;findStar(a,star);
-    for (int id:star) { const auto &t=mesh.getTetra(id);if (std::find(t.v,t.v+4,b)!=t.v+4) return id; }
+    for (int id:starOf(a)) { if (hasVertex(mesh.getTetra(id).v,b)) return id; }
     return RTetraMesh::noTetra;
 }
 
 bool RTetraMeshOptimizer::findFace(int a,int b,int c,RTetraMesh::Face &face) const
 {
-    std::vector<int> star;findStar(a,star);
-    for (int id:star)
+    for (int id:starOf(a))
     {
         const auto &t=mesh.getTetra(id);int count=0,opposite=-1;
         for (int i=0;i<4;i++) { if (t.v[i]==a || t.v[i]==b || t.v[i]==c) count++;else opposite=i; }
@@ -94,11 +112,20 @@ double RTetraMeshOptimizer::objectiveScore(const RTetraMeshQuality::Element &qua
     return qualityScore(q);
 }
 
-bool RTetraMeshOptimizer::replace(const std::vector<int> &oldIDs,std::vector<std::array<int,4>> proposed,bool delaunay)
+struct RTetraMeshOptimizer::PatchState
+{
+    enum Failure { None, Region, Degenerate, Topology };
+    bool ready=false;
+    Failure failure=None;
+    double center[3]={0,0,0},scale=0;
+    double score=0,energy=0,volume=0,size=0,angle=0,ratio=0;
+    size_t subOne=0;
+};
+
+bool RTetraMeshOptimizer::replace(const std::vector<int> &oldIDs,std::vector<std::array<int,4>> &proposed,bool delaunay,bool boundaryChecked,PatchState *shared)
 {
     if (oldIDs.empty()) return false;
     const int region=this->mesh.getTetra(oldIDs.front()).region;
-    std::set<int> points;
     std::set<std::array<int,3>> newFaces;
     std::set<std::array<int,2>> newEdges;
     for (auto &v : proposed)
@@ -106,6 +133,7 @@ bool RTetraMeshOptimizer::replace(const std::vector<int> &oldIDs,std::vector<std
         double sign=RGeometricPredicates::orient3d(mesh.getPoint(v[0]),mesh.getPoint(v[1]),mesh.getPoint(v[2]),mesh.getPoint(v[3]));
         if (sign<0.0) std::swap(v[0],v[1]);
         if (sign==0.0) { rejected.topology++;return false; }
+        if (boundaryChecked) continue;
         for (int i=0;i<4;i++)
         {
             const int *f=RTetraMesh::faceVertices[i];
@@ -113,24 +141,16 @@ bool RTetraMeshOptimizer::replace(const std::vector<int> &oldIDs,std::vector<std
             for (int j=i+1;j<4;j++) newEdges.insert({std::min(v[i],v[j]),std::max(v[i],v[j])});
         }
     }
-    for (int id : oldIDs)
-    {
-        if (!mesh.isAlive(id) || mesh.isGhost(id) || mesh.getTetra(id).region!=region) { rejected.region++;return false; }
-        const auto &t=mesh.getTetra(id);
-        points.insert(t.v,t.v+4);
-        for (int i=0;i<4;i++)
-        {
-            const int *f=RTetraMesh::faceVertices[i];
-            std::array<int,3> key={t.v[f[0]],t.v[f[1]],t.v[f[2]]};std::sort(key.begin(),key.end());
-            if (boundary.findSubFace(key[0],key[1],key[2])>=0 && !newFaces.count(key)) { rejected.boundary++;return false; }
-            for (int j=i+1;j<4;j++)
-                if (boundary.findSubSegment(t.v[i],t.v[j])>=0 && !newEdges.count({std::min(t.v[i],t.v[j]),std::max(t.v[i],t.v[j])})) { rejected.boundary++;return false; }
-        }
-    }
-    double center[3]={0,0,0},scale=0;
-    for (int v : points) for (int i=0;i<3;i++) center[i]+=mesh.getPoint(v)[i]/double(points.size());
-    for (int v : points) for (int i=0;i<3;i++) scale=std::max(scale,std::fabs(mesh.getPoint(v)[i]-center[i]));
-    if (!(scale>0.0)) return false;
+    // Everything measured on the old cells is independent of the proposal once the
+    // boundary is known to be preserved, so one patch state serves all its proposals.
+    PatchState local;
+    PatchState &state=shared && boundaryChecked?*shared:local;
+    auto fail=[&](PatchState::Failure failure) {
+        state.failure=failure;
+        if (failure==PatchState::Region) rejected.region++;
+        if (failure==PatchState::Topology) rejected.topology++;
+        return false;
+    };
     auto metrics=[&](const std::vector<std::array<int,4>> &tets,double &worst,double &energy,double &maxVolume,double &sizeExcess,double &angle,double &ratio,size_t &subOne,double scoreFloor=-1.0) {
         angle=180;ratio=0;subOne=0;
         worst=1.0; energy=0;maxVolume=0;sizeExcess=0;
@@ -147,17 +167,48 @@ bool RTetraMeshOptimizer::replace(const std::vector<int> &oldIDs,std::vector<std
             if (delaunay)
             {
                 double sum=0;
-                for (int id : v) for (int i=0;i<3;i++) sum+=std::pow((mesh.getPoint(id)[i]-center[i])/scale,2);
-                energy+=(q.volume/(scale*scale*scale))*sum;
+                for (int id : v) for (int i=0;i<3;i++) sum+=std::pow((mesh.getPoint(id)[i]-state.center[i])/state.scale,2);
+                energy+=(q.volume/(state.scale*state.scale*state.scale))*sum;
             }
         }
         return true;
     };
-    std::vector<std::array<int,4>> old;
-    for (int id : oldIDs) { const auto &t=mesh.getTetra(id);old.push_back({t.v[0],t.v[1],t.v[2],t.v[3]}); }
-    double before,after,energyBefore,energyAfter,volumeBefore,volumeAfter,sizeBefore,sizeAfter,angleBefore,angleAfter,ratioBefore,ratioAfter;
-    size_t subBefore,subAfter;
-    if (!metrics(old,before,energyBefore,volumeBefore,sizeBefore,angleBefore,ratioBefore,subBefore)) { rejected.topology++;return false; }
+    if (state.ready)
+    {
+        if (state.failure!=PatchState::None) return fail(state.failure);
+    }
+    else
+    {
+        state.ready=true;
+        std::vector<int> points;points.reserve(4*oldIDs.size());
+        for (int id : oldIDs)
+        {
+            if (!mesh.isAlive(id) || mesh.isGhost(id) || mesh.getTetra(id).region!=region) return fail(PatchState::Region);
+            const auto &t=mesh.getTetra(id);
+            points.insert(points.end(),t.v,t.v+4);
+            if (boundaryChecked) continue;
+            for (int i=0;i<4;i++)
+            {
+                const int *f=RTetraMesh::faceVertices[i];
+                std::array<int,3> key={t.v[f[0]],t.v[f[1]],t.v[f[2]]};std::sort(key.begin(),key.end());
+                if (boundary.findSubFace(key[0],key[1],key[2])>=0 && !newFaces.count(key)) { rejected.boundary++;return false; }
+                for (int j=i+1;j<4;j++)
+                    if (boundary.findSubSegment(t.v[i],t.v[j])>=0 && !newEdges.count({std::min(t.v[i],t.v[j]),std::max(t.v[i],t.v[j])})) { rejected.boundary++;return false; }
+            }
+        }
+        // Ascending order keeps the rounding of the center independent of cell order.
+        std::sort(points.begin(),points.end());points.erase(std::unique(points.begin(),points.end()),points.end());
+        for (int v : points) for (int i=0;i<3;i++) state.center[i]+=mesh.getPoint(v)[i]/double(points.size());
+        for (int v : points) for (int i=0;i<3;i++) state.scale=std::max(state.scale,std::fabs(mesh.getPoint(v)[i]-state.center[i]));
+        if (!(state.scale>0.0)) return fail(PatchState::Degenerate);
+        std::vector<std::array<int,4>> old;old.reserve(oldIDs.size());
+        for (int id : oldIDs) { const auto &t=mesh.getTetra(id);old.push_back({t.v[0],t.v[1],t.v[2],t.v[3]}); }
+        if (!metrics(old,state.score,state.energy,state.volume,state.size,state.angle,state.ratio,state.subOne)) return fail(PatchState::Topology);
+    }
+    const double before=state.score,energyBefore=state.energy,volumeBefore=state.volume,sizeBefore=state.size,angleBefore=state.angle,ratioBefore=state.ratio;
+    const size_t subBefore=state.subOne;
+    double after,energyAfter,volumeAfter,sizeAfter,angleAfter,ratioAfter;
+    size_t subAfter;
     const double scoreFloor=orderedRepairActive && !delaunay?before*(1+1e-5)+1e-12:-1.0;
     if (!metrics(proposed,after,energyAfter,volumeAfter,sizeAfter,angleAfter,ratioAfter,subAfter,scoreFloor))
     { if (scoreFloor>=0) rejected.quality++;else rejected.topology++;return false; }
@@ -214,45 +265,92 @@ bool RTetraMeshOptimizer::flipFace(int a,int b,int c,bool delaunay)
     int e=-1;
     for (int v : mesh.getTetra(other).v) if (v!=a && v!=b && v!=c) e=v;
     const int d=t.v[face.face];
-    if (e<0 || findEdge(d,e)!=RTetraMesh::noTetra) return false;
-    return replace({face.tetra,other},{{d,e,a,b},{d,e,b,c},{d,e,c,a}},delaunay);
+    if (e<0) return false;
+    // The Delaunay objective is the volume under the lifted mesh, which a 2-3 flip
+    // lowers only if the opposite vertex lies inside the circumscribed sphere.
+    if (delaunay && !(RGeometricPredicates::inSphere(mesh.getPoint(t.v[0]),mesh.getPoint(t.v[1]),mesh.getPoint(t.v[2]),mesh.getPoint(t.v[3]),mesh.getPoint(e))>0.0))
+    { profile.delaunaySkips++;return false; }
+    if (findEdge(d,e)!=RTetraMesh::noTetra) return false;
+    // The only prescribed entity a 2-3 flip can remove is the face tested above.
+    std::vector<std::array<int,4>> proposed={{d,e,a,b},{d,e,b,c},{d,e,c,a}};
+    return replace({face.tetra,other},proposed,delaunay,true);
 }
 
 bool RTetraMeshOptimizer::flipEdge(int a,int b,bool delaunay)
 {
     if (boundary.findSubSegment(a,b)>=0) { rejected.boundary++;return false; }
-    std::vector<int> star,ids;
-    findStar(a,star);
-    std::map<int,std::vector<int>> ring;
-    for (int id : star)
+    std::vector<int> ids;
+    for (int id : starOf(a))
     {
         const auto &t=mesh.getTetra(id);
-        if (std::find(t.v,t.v+4,b)==t.v+4) continue;
+        if (!hasVertex(t.v,b)) continue;
         if (mesh.isGhost(id)) return false;
         ids.push_back(id);
-        int x=-1,y=-1;
-        for (int v : t.v) if (v!=a && v!=b) { if (x<0) x=v; else y=v; }
-        ring[x].push_back(y);ring[y].push_back(x);
     }
     if (ids.size()<3 || ids.size()>((orderedRepairActive || simpleRepair)?8:10)) return false;
+    // Vertices around the edge with their neighbors in the order cells are met.
+    // At most ten cells remain here, so a linear search beats a tree.
+    struct RingVertex { int vertex,next[2],count; };
+    std::array<RingVertex,20> ring;size_t ringSize=0;
+    auto link=[&](int x,int y) {
+        for (size_t i=0;i<ringSize;i++) if (ring[i].vertex==x) { if (ring[i].count<2) ring[i].next[ring[i].count]=y;ring[i].count++;return; }
+        ring[ringSize++]={x,{y,-1},1};
+    };
+    for (int id : ids)
+    {
+        const auto &t=mesh.getTetra(id);
+        int x=-1,y=-1;
+        for (int v : t.v) if (v!=a && v!=b) { if (x<0) x=v; else y=v; }
+        link(x,y);link(y,x);
+    }
     size_t stamp=1;
     vertexRevision.resize(size_t(mesh.getNPoints()),revision);
     for (int id : ids) for (int v : mesh.getTetra(id).v) stamp=std::max(stamp,vertexRevision[size_t(v)]);
     const std::array<int,3> cacheKey={a,b,int(delaunay)|(int(orderedRepairActive)<<1)|(int(simpleRepair)<<2)};
     if (edgeRevision[cacheKey]==stamp) { profile.queueSkips++;return false; }
     edgeRevision[cacheKey]=stamp;
-    if (ring.size()!=ids.size()) return false;
-    for (const auto &v : ring) if (v.second.size()!=2) return false;
-    std::vector<int> cycle;
-    int previous=-1,current=ring.begin()->first;
-    for (size_t i=0;i<ring.size();i++)
+    if (delaunay)
+    {
+        // The lifted mesh is convex across every locally Delaunay face. If all faces
+        // at the edge are, it lies below any other mesh of these cells' vertices
+        // and no removal of the edge can lower the Delaunay objective.
+        bool improvable=false;
+        for (size_t i=0;i<ids.size() && !improvable;i++)
+        {
+            const auto &t=mesh.getTetra(ids[i]);
+            for (int j=0;j<4 && !improvable;j++)
+            {
+                // The face opposite to a vertex of the ring is shared with the next cell at the edge.
+                if (t.v[j]==a || t.v[j]==b || t.n[j]<ids[i]) continue;
+                const auto &n=mesh.getTetra(t.n[j]);
+                for (int v : n.v)
+                {
+                    if (v==RTetraMesh::ghostVertex || hasVertex(t.v,v)) continue;
+                    improvable=RGeometricPredicates::inSphere(mesh.getPoint(t.v[0]),mesh.getPoint(t.v[1]),mesh.getPoint(t.v[2]),mesh.getPoint(t.v[3]),mesh.getPoint(v))>0.0;
+                }
+            }
+        }
+        if (!improvable) { profile.delaunaySkips++;return false; }
+    }
+    if (ringSize!=ids.size()) return false;
+    for (size_t i=0;i<ringSize;i++) if (ring[i].count!=2) return false;
+    std::vector<int> cycle;cycle.reserve(ringSize);
+    // The cycle starts at the lowest vertex, as it did when the ring was an ordered map.
+    int previous=-1,current=ring[0].vertex;
+    for (size_t i=1;i<ringSize;i++) current=std::min(current,ring[i].vertex);
+    for (size_t i=0;i<ringSize;i++)
     {
         if (std::find(cycle.begin(),cycle.end(),current)!=cycle.end()) return false;
         cycle.push_back(current);
-        const auto &next=ring[current];int n=next[0]==previous?next[1]:next[0];previous=current;current=n;
+        const int *next=nullptr;
+        for (size_t j=0;j<ringSize;j++) if (ring[j].vertex==current) next=ring[j].next;
+        int n=next[0]==previous?next[1]:next[0];previous=current;current=n;
     }
     if (current!=cycle.front()) return false;
     for (int v : cycle) if (boundary.findSubFace(a,b,v)>=0) { rejected.boundary++;return false; }
+    // Removing the edge keeps every other face and edge of its cells, so the
+    // boundary needs no further test and the old cells are measured only once.
+    PatchState patch;
     auto fans=[&]() {
         for (size_t root=0;root<cycle.size();root++)
         {
@@ -263,7 +361,7 @@ bool RTetraMeshOptimizer::flipEdge(int a,int b,bool delaunay)
                 if (j>1 && findEdge(x,y)!=RTetraMesh::noTetra) { allowed=false;break; }
                 proposed.push_back({x,y,z,a});proposed.push_back({x,z,y,b});
             }
-            if (allowed && replace(ids,proposed,delaunay)) return true;
+            if (allowed && replace(ids,proposed,delaunay,true,&patch)) return true;
         }
         return false;
     };
@@ -332,7 +430,7 @@ bool RTetraMeshOptimizer::flipEdge(int a,int b,bool delaunay)
     if (split[0][n-1]>=0)
     {
         triangulate(0,n-1);
-        if (replace(ids,proposed,delaunay)) return true;
+        if (replace(ids,proposed,delaunay,true,&patch)) return true;
     }
     // The bottleneck solution can be geometrically inadmissible for a nonplanar
     // link, or conflict with an existing external face. Retain bounded alternative
@@ -346,7 +444,7 @@ bool RTetraMeshOptimizer::flipEdge(int a,int b,bool delaunay)
             if (j>1 && findEdge(x,y)!=RTetraMesh::noTetra) { allowed=false;break; }
             proposed.push_back({x,y,z,a});proposed.push_back({x,z,y,b});
         }
-        if (allowed && replace(ids,proposed,delaunay)) return true;
+        if (allowed && replace(ids,proposed,delaunay,true,&patch)) return true;
     }
     return false;
 }
@@ -724,7 +822,7 @@ bool RTetraMeshOptimizer::compoundFlip(int id)
         profile.journalBytes+=firstTrial.bytesSaved();firstTrial.rollback();
         // Restore the original topology before evaluating each complete patch.
         // Candidate and slot order match the former independent trial copies.
-        for (auto &candidate:complete) if (replace(candidate.removed,std::move(candidate.added),false)) return true;
+        for (auto &candidate:complete) if (replace(candidate.removed,candidate.added,false)) return true;
     }
     return false;
 }
@@ -814,26 +912,46 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
     RTetraMeshProfile::Timer timer(profile.orderedRepair);
     RTetraMeshProgress progress(moveVertices ? "Optimizing mesh: preparing repair sweeps" : "Repairing initial mesh");
     orderedRepairActive=true;unsigned int changes=0;
+    // Vertices of each cell when it was last scheduled, and the list generation it went to.
+    // A cell met again unchanged would only add keys which its list already holds.
+    std::vector<std::array<int,4>> scheduledCells;
+    std::vector<unsigned int> scheduledMarks;
+    unsigned int scheduleMark=0;
     for (int stage=0;stage<2;stage++)
     {
         progress.initialize(stage==0 ? "Repairing mesh: preparing Delaunay sweeps" : "Optimizing mesh: preparing quality sweeps");
-        std::set<std::array<int,3>> faces;
-        std::set<std::array<int,2>> edges;
-        std::set<int> vertices;
+        // Work for the next sweep is appended as it is found and put in order when the
+        // sweep starts, which visits the same keys in the same order as ordered sets would.
+        std::vector<std::array<int,3>> faces;
+        std::vector<std::array<int,2>> edges;
+        std::vector<int> vertices;
+        size_t faceLimit=0,edgeLimit=0,vertexLimit=0;
         auto schedule=[&](int id) {
             if (!mesh.isAlive(id) || mesh.isGhost(id)) return;
             const auto &t=mesh.getTetra(id);
-            if (moveVertices && stage==1) for (int v : t.v) if (boundary.getVertexType(v)==RBoundaryRecovery::VertexVolume && !boundary.isBoundaryVertex(v)) vertices.insert(v);
+            if (size_t(id)>=scheduledMarks.size()) { scheduledMarks.resize(size_t(mesh.getNTetraSlots()),0);scheduledCells.resize(scheduledMarks.size()); }
+            if (scheduledMarks[size_t(id)]==scheduleMark && std::equal(t.v,t.v+4,scheduledCells[size_t(id)].begin())) return;
+            scheduledMarks[size_t(id)]=scheduleMark;std::copy(t.v,t.v+4,scheduledCells[size_t(id)].begin());
+            if (moveVertices && stage==1) for (int v : t.v) if (boundary.getVertexType(v)==RBoundaryRecovery::VertexVolume && !boundary.isBoundaryVertex(v)) vertices.push_back(v);
             for (int i=0;i<4;i++)
             {
-                const int *f=RTetraMesh::faceVertices[i];auto key=std::array<int,3>{t.v[f[0]],t.v[f[1]],t.v[f[2]]};std::sort(key.begin(),key.end());faces.insert(key);
-                for (int j=i+1;j<4;j++) edges.insert({std::min(t.v[i],t.v[j]),std::max(t.v[i],t.v[j])});
+                const int *f=RTetraMesh::faceVertices[i];auto key=std::array<int,3>{t.v[f[0]],t.v[f[1]],t.v[f[2]]};std::sort(key.begin(),key.end());faces.push_back(key);
+                for (int j=i+1;j<4;j++) edges.push_back({std::min(t.v[i],t.v[j]),std::max(t.v[i],t.v[j])});
             }
         };
+        // Repeated keys are dropped whenever a list doubles, which bounds its memory.
+        auto compact=[](auto &keys,size_t &limit) {
+            if (keys.size()<limit) return;
+            makeUnique(keys);limit=std::max(size_t(65536),2*keys.size());
+        };
+        faces.reserve(4*size_t(mesh.getNTetraSlots()));edges.reserve(6*size_t(mesh.getNTetraSlots()));
+        ++scheduleMark;
         for (int id=0;id<mesh.getNTetraSlots();id++) schedule(id);
         for (int wave=0;wave<(stage==0?5:8) && (!faces.empty() || !edges.empty() || !vertices.empty());wave++)
         {
+            makeUnique(faces);makeUnique(edges);makeUnique(vertices);
             const auto currentFaces=std::move(faces);const auto currentEdges=std::move(edges);const auto currentVertices=std::move(vertices);faces.clear();edges.clear();vertices.clear();
+            faceLimit=edgeLimit=vertexLimit=65536;++scheduleMark;
             progress.initialize(QString("%1: sweep %2 of %3")
                 .arg(stage==0 ? "Repairing mesh Delaunayness" : "Optimizing mesh quality")
                 .arg(wave+1).arg(stage==0 ? 5 : 8),false);
@@ -848,6 +966,7 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
                 // Each cell contributes the same set keys once, even when it
                 // belongs to several changed vertex stars.
                 for (int id:affected) schedule(id);
+                compact(faces,faceLimit);compact(edges,edgeLimit);compact(vertices,vertexLimit);
             };
             for (const auto &f : currentFaces) { orderedVisits++;if (flipFace(f[0],f[1],f[2],stage==0)) { changes++;reschedule(); } progress.print(++processed,total); }
             for (const auto &e : currentEdges) { orderedVisits++;if (flipEdge(e[0],e[1],stage==0)) { changes++;reschedule(); } progress.print(++processed,total); }
@@ -879,8 +998,8 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
     for (int stage=1;stage<2;stage++)
     {
         std::priority_queue<Candidate> queue;
-        std::map<std::array<int,4>,int> pending;
-        std::map<std::array<int,4>,unsigned int> visits;
+        std::unordered_map<std::array<int,4>,int,KeyHash> pending;
+        std::unordered_map<std::array<int,4>,unsigned int,KeyHash> visits;
         std::vector<unsigned int> vertexVisits(size_t(mesh.getNPoints()),0);
         std::vector<size_t> vertexAttemptStamp(size_t(mesh.getNPoints()),0);
         auto enqueue=[&](int id) {
@@ -972,18 +1091,20 @@ unsigned int RTetraMeshOptimizer::repairCreated(bool preferSimpleFlips)
     simpleRepair=preferSimpleFlips;
     const auto seed=boundary.getCreatedTetras();
     boundaryEpoch++;touch(seed);
-    std::set<std::array<int,3>> faces;
-    std::set<std::array<int,2>> edges;
+    std::vector<std::array<int,3>> faces;
+    std::vector<std::array<int,2>> edges;
+    faces.reserve(4*seed.size());edges.reserve(6*seed.size());
     for (int id : seed) if (mesh.isAlive(id) && !mesh.isGhost(id))
     {
         const auto t=mesh.getTetra(id);
         for (int i=0;i<4;i++)
         {
             const int *f=RTetraMesh::faceVertices[i];
-            std::array<int,3> key={t.v[f[0]],t.v[f[1]],t.v[f[2]]};std::sort(key.begin(),key.end());faces.insert(key);
-            for (int j=i+1;j<4;j++) edges.insert({std::min(t.v[i],t.v[j]),std::max(t.v[i],t.v[j])});
+            std::array<int,3> key={t.v[f[0]],t.v[f[1]],t.v[f[2]]};std::sort(key.begin(),key.end());faces.push_back(key);
+            for (int j=i+1;j<4;j++) edges.push_back({std::min(t.v[i],t.v[j]),std::max(t.v[i],t.v[j])});
         }
     }
+    makeUnique(faces);makeUnique(edges);
     unsigned int count=0;
     for (const auto &f : faces) count+=flipFace(f[0],f[1],f[2],true);
     for (const auto &e : edges) count+=flipEdge(e[0],e[1],true);

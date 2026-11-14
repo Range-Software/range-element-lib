@@ -1,6 +1,7 @@
 #ifndef REL_TETRA_MESH_OPTIMIZER_H
 #define REL_TETRA_MESH_OPTIMIZER_H
 #include <array>
+#include <cstdint>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -16,17 +17,34 @@ class RTetraMeshOptimizer
     RBoundaryRecovery &boundary;
     const RTetraMeshOptions &options;
     mutable RTetraMeshProfile profile;
-    struct CachedElement { size_t stamp=0,boundaryEpoch=0;RTetraMeshQuality::Element value; };
+    struct CachedElement { std::array<int,4> key={};size_t stamp=0,boundaryEpoch=0;RTetraMeshQuality::Element value; };
     struct ArrayHash { size_t operator()(const std::array<int,4> &v) const noexcept { size_t h=0;for (int p : v) h^=size_t(p)+0x9e3779b9+(h<<6)+(h>>2);return h; } };
-    mutable std::unordered_map<std::array<int,4>,CachedElement,ArrayHash> qualityCache;
+    struct KeyHash
+    {
+        template <size_t N> size_t operator()(const std::array<int,N> &v) const noexcept
+        {
+            uint64_t h=0x9e3779b97f4a7c15ULL;
+            for (int p : v) { h^=uint64_t(uint32_t(p));h*=0xff51afd7ed558ccdULL;h^=h>>33; }
+            return size_t(h);
+        }
+    };
+    //! Direct-mapped: a cell which meets another one in its slot replaces it. Measurements
+    //! depend only on the key and the stamps, so what the cache holds never changes a result.
+    mutable std::vector<CachedElement> qualityCache;
     mutable std::vector<std::vector<int>> starCache;
     mutable std::vector<size_t> starCacheStamp;
     RTetraMeshQuality::Element element(const RTetraMesh &,const RBoundaryRecovery &,const int *vertices,int moved=-1,const double *position=nullptr) const;
     void findStar(int point,std::vector<int> &star) const;
+    //! Cached star of a vertex, valid until the next star query.
+    const std::vector<int> &starOf(int point) const;
     int findEdge(int a,int b) const;
     bool findFace(int a,int b,int c,RTetraMesh::Face &face) const;
     double objectiveScore(const RTetraMeshQuality::Element &quality) const;
-    bool replace(const std::vector<int> &oldIDs, std::vector<std::array<int,4>> proposed, bool delaunay);
+    //! Measurements of the replaced cells, shared by proposals for one patch.
+    struct PatchState;
+    //! Proposed cells are reoriented in place. Callers which have verified that no
+    //! prescribed face or edge of the old cells can be lost pass boundaryChecked.
+    bool replace(const std::vector<int> &oldIDs, std::vector<std::array<int,4>> &proposed, bool delaunay, bool boundaryChecked = false, PatchState *state = nullptr);
     bool flipFace(int a,int b,int c,bool delaunay);
     bool flipEdge(int a,int b,bool delaunay);
     bool relocate(int vertex);
@@ -53,8 +71,8 @@ class RTetraMeshOptimizer
     std::vector<size_t> vertexRevision;
     std::vector<size_t> geometryRevision;
     size_t boundaryEpoch=1;
-    std::map<std::array<int,3>,size_t> edgeRevision;
-    std::map<std::array<int,4>,size_t> faceRevision;
+    std::unordered_map<std::array<int,3>,size_t,KeyHash> edgeRevision;
+    std::unordered_map<std::array<int,4>,size_t,KeyHash> faceRevision;
     void touch(const std::vector<int> &tetrahedra);
 public:
     RTetraMeshOptimizer(RTetraMesh &mesh,RBoundaryRecovery &boundary,const RTetraMeshOptions &options);
