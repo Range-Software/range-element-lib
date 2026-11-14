@@ -1,4 +1,5 @@
 #include <QTest>
+#include <rbl_error.h>
 #include <QTemporaryDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -65,6 +66,103 @@ class TestTetraMeshOptimizer : public QObject
         }
     }
 private slots:
+    void planarPatchRecovery_data()
+    {
+        QTest::addColumn<double>("scale");
+        QTest::addColumn<bool>("protectDiagonal");
+        QTest::newRow("small") << 1e-6 << false;
+        QTest::newRow("unit") << 1.0 << false;
+        QTest::newRow("large") << 1e6 << false;
+        QTest::newRow("constrained-diagonal") << 1.0 << true;
+    }
+    void planarPatchRecovery()
+    {
+        QFETCH(double,scale);
+        QFETCH(bool,protectDiagonal);
+        RTetraMesh mesh;
+        for (const auto &p : std::vector<std::array<double,3>>{
+                 {0,0,0},{3,0,0},{4,2,0},{2,4,0},{0,2,0},{.8,1.3,1},{.8,1.3,-1}})
+            mesh.addPoint(p[0]*scale,p[1]*scale,p[2]*scale);
+        std::vector<int> duplicates;
+        RDelaunayTetrahedralizer::tetrahedralize(mesh,duplicates);
+        auto fan = [&](int root) {
+            std::vector<std::array<int,4>> cells;
+            for (int i=1;i<4;i++) for (int pole : {5,6})
+                cells.push_back({root,(root+i)%5,(root+i+1)%5,pole});
+            orient(mesh,cells);
+            return cells;
+        };
+        auto initial = fan(0);
+        QVERIFY(mesh.replaceTetras(finite(mesh),initial));
+        RBoundaryRecovery boundary(mesh,1e-10);
+        for (int i=0;i<5;i++) for (int pole : {5,6})
+            boundary.addTriangle(i,(i+1)%5,pole,1);
+        for (int i=1;i<4;i++) boundary.addTriangle(0,i,i+1,7);
+        if (protectDiagonal) boundary.addEdge(0,2,42);
+        boundary.initialize();
+        // Replace a recovered planar fan by a different, non-cocircular fan.
+        // A single diagonal flip cannot match these two triangulations.
+        auto replacement = fan(1);
+        QVERIFY(mesh.replaceTetras(finite(mesh),replacement));
+        boundary.setMinLength(scale*1e-8);
+        boundary.setMaxSteinerVertices(500);
+        boundary.recover();
+        if (!protectDiagonal) QCOMPARE(mesh.getNPoints(),7);
+        double interfaceArea = 0;
+        for (const auto &face : boundary.getSubFaces()) if (face.alive)
+        {
+            RTetraMesh::Face found;
+            QVERIFY(mesh.findFace(face.v[0],face.v[1],face.v[2],found));
+            if (face.marker == 7)
+            {
+                const double *a=mesh.getPoint(face.v[0]),*b=mesh.getPoint(face.v[1]),*c=mesh.getPoint(face.v[2]);
+                QCOMPARE(a[2],0.0);QCOMPARE(b[2],0.0);QCOMPARE(c[2],0.0);
+                interfaceArea += std::fabs((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]))/2;
+            }
+            else QCOMPARE(face.marker,1);
+        }
+        QVERIFY(std::fabs(interfaceArea/(scale*scale)-11.0)<1e-10);
+        if (protectDiagonal)
+        {
+            double length = 0;
+            for (const auto &edge : boundary.getSubSegments()) if (edge.alive && edge.marker == 42)
+            {
+                QVERIFY(mesh.findEdge(edge.v[0],edge.v[1]) != RTetraMesh::noTetra);
+                const double *a=mesh.getPoint(edge.v[0]),*b=mesh.getPoint(edge.v[1]);
+                length += std::hypot(a[0]-b[0],a[1]-b[1]);
+            }
+            QVERIFY(std::fabs(length-std::sqrt(20.0))<1e-10);
+        }
+        topology(mesh);
+    }
+    void recoveryFailureReportsSplitLimit()
+    {
+        RTetraMesh mesh;bipyramid(mesh);
+        std::vector<std::array<int,4>> cells{{3,4,0,1},{3,4,1,2},{3,4,2,0}};
+        orient(mesh,cells);
+        QVERIFY(mesh.replaceTetras(finite(mesh),cells));
+        RBoundaryRecovery boundary(mesh,1e-10);hull(boundary);
+        boundary.addTriangle(0,1,2,8);
+        boundary.initialize();
+        boundary.setMinLength(10.0);
+        const int points = mesh.getNPoints();
+        bool failed = false;
+        try { boundary.recover(); }
+        catch (const RError &error)
+        {
+            failed = true;
+            const QString message = error.getMessage();
+            QVERIFY2(message.contains("Triangle circumradius is at or below the minimum split length"),qPrintable(message));
+            QVERIFY(message.contains("nodes 0, 1, 2"));
+            QVERIFY(message.contains("surface marker 8"));
+            QVERIFY(message.contains("Circumradius ="));
+            QVERIFY(message.contains("minimum split length = 10"));
+            QVERIFY(!message.contains("Surface may intersect itself"));
+        }
+        QVERIFY(failed);
+        QCOMPARE(mesh.getNPoints(),points);
+        topology(mesh);
+    }
     void qualityAndScale()
     {
         for (double scale : {1e-8,1.0,1e8})

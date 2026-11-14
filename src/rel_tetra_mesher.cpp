@@ -13,6 +13,7 @@
 #include "rel_delaunay_tetrahedralizer.h"
 #include "rel_geometric_predicates.h"
 #include "rel_tetra_mesh.h"
+#include "rel_tetra_mesh_progress.h"
 #include "rel_tetra_mesh_refiner.h"
 #include "rel_tetra_mesher.h"
 #include "rel_tetra_mesh_optimizer.h"
@@ -177,6 +178,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
 void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *resultProfile)
 {
+    RTetraMeshProgress progress("Preparing volume mesh");
     RTetraMeshProfile profile;
     RTetraMeshProfile::Timer totalTimer(profile.total);
     const std::vector<RTetraMeshData::Node> &rInputNodes = input.getNodes();
@@ -213,6 +215,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         RLogger::info("Tetrahedralizing %d nodes.\n",nInputNodes);
     }
 
+    progress.initialize("Tetrahedralizing nodes");
     std::vector<int> duplicates;
     { RTetraMeshProfile::Timer timer(profile.tetrahedralization);
       RDelaunayTetrahedralizer::tetrahedralize(mesh,duplicates); }
@@ -234,6 +237,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     // Boundary.
 
+    progress.initialize("Recovering mesh boundary");
     RTetraMeshProfile::Timer boundaryTimer(profile.boundary);
     RBoundaryRecovery boundary(mesh,options.getTolerance());
     boundary.setMinLength(minLengthRatio * modelSize);
@@ -289,6 +293,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexFacet)));
     }
 
+    progress.initialize("Classifying mesh regions");
     int nRegions = boundary.classifyRegions();
     if (nRegions == 0)
     {
@@ -329,7 +334,9 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                              static_cast<unsigned long long>(boundary.getNSteinerVertices()));
         }
 
+        progress.initialize("Recovering refined mesh boundary");
         boundary.recover();
+        progress.initialize("Classifying refined mesh regions");
         nRegions = boundary.classifyRegions();
         if (nRegions == 0)
         {
@@ -346,6 +353,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     // Output.
 
+    progress.initialize("Preparing generated mesh output");
     output.clear();
 
     std::vector<RTetraMeshData::Node> &rNodes = output.getNodes();
@@ -461,11 +469,13 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
 
     profile.addWork(optimizer.getProfile());
+    progress.initialize("Checking mesh quality");
     RTetraMeshQuality::Summary quality;
     { RTetraMeshProfile::Timer timer(profile.diagnostics);quality=RTetraMeshQuality::summarize(output,options); }
     totalTimer.finish(); // Excludes optional report serialization and logging.
     if (!options.getQualityReportPath().empty())
     {
+        progress.initialize("Writing mesh quality report");
         const RTetraMeshQuality::Work work={optimizer.getQueueVisits(),optimizer.getBudgetStops(),optimizer.getInsertedPoints(),optimizer.getOrderedVisits(),optimizer.getBoundaryPoints(),&profile};
         RTetraMeshQuality::writeReport(output,options,optimizer.getPatchAttempts(),options.getQualityReportPath(),&work);
     }

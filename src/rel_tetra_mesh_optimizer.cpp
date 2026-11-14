@@ -9,6 +9,7 @@
 #include "rel_geometric_predicates.h"
 #include "rel_delaunay_tetrahedralizer.h"
 #include "rel_tetra_mesh_optimizer.h"
+#include "rel_tetra_mesh_progress.h"
 #include "rel_tetra_mesh_quality.h"
 
 namespace
@@ -811,9 +812,11 @@ bool RTetraMeshOptimizer::boundaryPatch(int id)
 unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
 {
     RTetraMeshProfile::Timer timer(profile.orderedRepair);
+    RTetraMeshProgress progress(moveVertices ? "Optimizing mesh: preparing repair sweeps" : "Repairing initial mesh");
     orderedRepairActive=true;unsigned int changes=0;
     for (int stage=0;stage<2;stage++)
     {
+        progress.initialize(stage==0 ? "Repairing mesh: preparing Delaunay sweeps" : "Optimizing mesh: preparing quality sweeps");
         std::set<std::array<int,3>> faces;
         std::set<std::array<int,2>> edges;
         std::set<int> vertices;
@@ -831,6 +834,11 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
         for (int wave=0;wave<(stage==0?5:8) && (!faces.empty() || !edges.empty() || !vertices.empty());wave++)
         {
             const auto currentFaces=std::move(faces);const auto currentEdges=std::move(edges);const auto currentVertices=std::move(vertices);faces.clear();edges.clear();vertices.clear();
+            progress.initialize(QString("%1: sweep %2 of %3")
+                .arg(stage==0 ? "Repairing mesh Delaunayness" : "Optimizing mesh quality")
+                .arg(wave+1).arg(stage==0 ? 5 : 8),false);
+            const uint64_t total = currentFaces.size()+currentEdges.size()+currentVertices.size();
+            uint64_t processed = 0;
             auto reschedule=[&]() {
                 std::set<int> points;
                 for (int id : changed) if (mesh.isAlive(id)) for (int v : mesh.getTetra(id).v) points.insert(v);
@@ -841,9 +849,9 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
                 // belongs to several changed vertex stars.
                 for (int id:affected) schedule(id);
             };
-            for (const auto &f : currentFaces) { orderedVisits++;if (flipFace(f[0],f[1],f[2],stage==0)) { changes++;reschedule(); } }
-            for (const auto &e : currentEdges) { orderedVisits++;if (flipEdge(e[0],e[1],stage==0)) { changes++;reschedule(); } }
-            for (int v : currentVertices) { orderedVisits++;if (centroidRelocate(v)) { changes++;reschedule(); } }
+            for (const auto &f : currentFaces) { orderedVisits++;if (flipFace(f[0],f[1],f[2],stage==0)) { changes++;reschedule(); } progress.print(++processed,total); }
+            for (const auto &e : currentEdges) { orderedVisits++;if (flipEdge(e[0],e[1],stage==0)) { changes++;reschedule(); } progress.print(++processed,total); }
+            for (int v : currentVertices) { orderedVisits++;if (centroidRelocate(v)) { changes++;reschedule(); } progress.print(++processed,total); }
         }
         if (!faces.empty() || !edges.empty() || !vertices.empty()) budgetStops++;
     }
@@ -864,6 +872,7 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
         bool operator<(const Candidate &b) const { return priority==b.priority?vertices>b.vertices:priority<b.priority; }
     };
     unsigned int changes=orderedRepair(true);
+    RTetraMeshProgress progress("Optimizing mesh: preparing bounded patch repairs");
     remeshAttempts=compoundAttempts=boundaryAttempts=0;
     // Ordered repair already restored Delaunayness and quality. The finishing
     // queue must not run another Delaunay stage which can undo sliver repairs.
@@ -891,6 +900,10 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
         size_t processed=0;
         while (!queue.empty() && processed<budget)
         {
+            progress.pulse([&]() {
+                return QString("Optimizing mesh: %1 patches visited, %2 queued")
+                    .arg(qulonglong(processed)).arg(qulonglong(queue.size()));
+            });
             const auto entry=queue.top();queue.pop();
             auto queued=pending.find(entry.vertices);
             if (queued==pending.end() || queued->second!=entry.id) continue;

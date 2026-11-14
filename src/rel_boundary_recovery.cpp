@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
+#include <set>
 
 #include <rbl_error.h>
 
@@ -226,6 +228,7 @@ int RBoundaryRecovery::addSubFace(int a, int b, int c, int marker)
     this->faces.push_back(face);
     this->replacedMarks.push_back(0);
     this->facetMarks.push_back(0);
+    this->facetMatchPoints.push_back(-1);
 
     const int faceID = int(this->faces.size()) - 1;
     this->faceMap[key] = faceID;
@@ -992,6 +995,151 @@ bool RBoundaryRecovery::matchSubFace(int faceID)
     return false;
 }
 
+bool RBoundaryRecovery::matchFacet(int faceID)
+{
+    // Reuse the volume mesh's triangulation instead of repeatedly subdividing
+    // a planar facet to force a different choice of diagonals. Nothing changes
+    // until the entire replacement has been validated.
+    const int pointCount = this->mesh.getNPoints();
+    if (this->facetMatchPoints[size_t(faceID)] == pointCount) return false;
+    const SubFace seed = this->faces[size_t(faceID)];
+    const double *origin = this->mesh.getPoint(seed.v[0]);
+    double normal[3];
+    findNormal(origin,this->mesh.getPoint(seed.v[1]),this->mesh.getPoint(seed.v[2]),normal);
+    const double normalLength = length(normal);
+    if (!(normalLength > 0.0)) return false;
+    for (double &component : normal) component /= normalLength;
+
+    const unsigned int stamp = ++this->facetStamp;
+    std::vector<int> patch{faceID};
+    this->facetMarks[size_t(faceID)] = stamp;
+    std::set<int> vertices;
+    std::map<uint64_t,int> oldEdges;
+    std::set<uint64_t> constraints;
+    double oldArea = 0.0;
+    for (size_t i=0;i<patch.size();i++)
+    {
+        // Bound a fallback independently of the Steiner-node budget.
+        if (patch.size() > 4096) return false;
+        const int id = patch[i];
+        this->facetMatchPoints[size_t(id)] = pointCount;
+        const SubFace &face = this->faces[size_t(id)];
+        double n[3];
+        findNormal(this->mesh.getPoint(face.v[0]),this->mesh.getPoint(face.v[1]),this->mesh.getPoint(face.v[2]),n);
+        if (!(dot(n,normal) > 0.0)) return false;
+        oldArea += dot(n,normal);
+        for (int j=0;j<3;j++)
+        {
+            vertices.insert(face.v[j]);
+            const uint64_t key = findEdgeKey(face.v[j],face.v[(j+1)%3]);
+            oldEdges[key]++;
+            if (this->segmentMap.count(key))
+            {
+                constraints.insert(key);
+                continue;
+            }
+            auto adjacent = this->edgeFaces.find(key);
+            if (adjacent == this->edgeFaces.end() || adjacent->second.size() != 2) return false;
+            for (int neighbor : adjacent->second)
+            {
+                if (this->facetMarks[size_t(neighbor)] == stamp) continue;
+                const SubFace &other = this->faces[size_t(neighbor)];
+                if (other.marker != seed.marker) return false;
+                // Do not accumulate approximate coplanarity across a curved patch.
+                for (int v : other.v)
+                {
+                    double offset[3];subtract(this->mesh.getPoint(v),origin,offset);
+                    if (std::fabs(dot(offset,normal)) > 64*std::numeric_limits<double>::epsilon()
+                        * std::max(1.0,length(offset))) return false;
+                }
+                this->facetMarks[size_t(neighbor)] = stamp;
+                patch.push_back(neighbor);
+            }
+        }
+    }
+
+    auto inside = [&](const double *p) {
+        for (int id : patch)
+        {
+            const SubFace &face = this->faces[size_t(id)];
+            bool contains = true;
+            for (int j=0;j<3;j++)
+            {
+                const double *a = this->mesh.getPoint(face.v[j]);
+                double edge[3], offset[3], product[3];
+                subtract(this->mesh.getPoint(face.v[(j+1)%3]),a,edge);
+                subtract(p,a,offset);cross(edge,offset,product);
+                if (dot(product,normal) < -64*std::numeric_limits<double>::epsilon()*length(edge)*length(offset))
+                {
+                    contains = false;
+                    break;
+                }
+            }
+            if (contains) return true;
+        }
+        return false;
+    };
+
+    std::set<std::array<int,3>> seen;
+    std::vector<std::array<int,3>> replacement;
+    std::map<uint64_t,int> newEdges;
+    std::set<int> newVertices;
+    double newArea = 0.0;
+    for (int vertex : vertices)
+    {
+        std::vector<int> star;
+        this->mesh.findStar(vertex,star);
+        for (int tetraID : star)
+        {
+            const auto &tetra = this->mesh.getTetra(tetraID);
+            for (int j=0;j<4;j++)
+            {
+                const int *indices = RTetraMesh::faceVertices[j];
+                std::array<int,3> triangle{tetra.v[indices[0]],tetra.v[indices[1]],tetra.v[indices[2]]};
+                if (!vertices.count(triangle[0]) || !vertices.count(triangle[1]) || !vertices.count(triangle[2])) continue;
+                auto key = triangle;std::sort(key.begin(),key.end());
+                if (!seen.insert(key).second) continue;
+                const double *a = this->mesh.getPoint(triangle[0]);
+                const double *b = this->mesh.getPoint(triangle[1]);
+                const double *c = this->mesh.getPoint(triangle[2]);
+                const double center[3] = {a[0]+((b[0]-a[0])+(c[0]-a[0]))/3,
+                                          a[1]+((b[1]-a[1])+(c[1]-a[1]))/3,
+                                          a[2]+((b[2]-a[2])+(c[2]-a[2]))/3};
+                if (!inside(center)) continue;
+                double n[3];findNormal(a,b,c,n);
+                const double area = dot(n,normal);
+                if (area == 0.0) return false;
+                if (area < 0.0) std::swap(triangle[1],triangle[2]);
+                newArea += std::fabs(area);
+                for (int k=0;k<3;k++)
+                {
+                    newVertices.insert(triangle[k]);
+                    newEdges[findEdgeKey(triangle[k],triangle[(k+1)%3])]++;
+                }
+                replacement.push_back(triangle);
+            }
+        }
+    }
+    if (replacement.empty() || newVertices != vertices
+        || std::fabs(newArea-oldArea) > 1e-10*oldArea) return false;
+    for (const auto &edge : oldEdges)
+    {
+        if (edge.second > 2 || (edge.second == 1 && newEdges[edge.first] != 1)) return false;
+    }
+    for (const auto &edge : newEdges)
+    {
+        if (edge.second > 2 || (edge.second == 1 && oldEdges[edge.first] != 1)) return false;
+    }
+    for (uint64_t edge : constraints) if (!newEdges.count(edge)) return false;
+
+    for (int id : patch) this->removeSubFace(id);
+    for (const auto &triangle : replacement)
+    {
+        this->queueSubFace(this->addSubFace(triangle[0],triangle[1],triangle[2],seed.marker));
+    }
+    return true;
+}
+
 RBoundaryRecovery::FacetLocation RBoundaryRecovery::locateInFacet(int faceID, const double *p) const
 {
     FacetLocation location;
@@ -1116,6 +1264,7 @@ void RBoundaryRecovery::splitEdgeFaces(int a, int b, int vertexID, std::vector<u
 
 bool RBoundaryRecovery::splitSubSegment(int segmentID, double minRadius)
 {
+    this->lastSplitFailure = "Constrained edge could not be split while preserving the boundary";
     const SubSegment segment = this->segments[size_t(segmentID)];
     const int a = segment.v[0];
     const int b = segment.v[1];
@@ -1125,6 +1274,7 @@ bool RBoundaryRecovery::splitSubSegment(int segmentID, double minRadius)
     const double segmentLength = distance(pa,pb);
     if (!(segmentLength > this->minLength))
     {
+        this->lastSplitFailure = "Constrained edge length is at or below the minimum split length";
         return false;
     }
 
@@ -1200,6 +1350,7 @@ bool RBoundaryRecovery::splitSubSegment(int segmentID, double minRadius)
     {
         if (duplicateID == a || duplicateID == b)
         {
+            this->lastSplitFailure = "Edge split point rounds to an existing endpoint";
             return false;
         }
         // There is a vertex lying on the subsegment already, which splits it.
@@ -1247,6 +1398,7 @@ bool RBoundaryRecovery::splitSubSegment(int segmentID, double minRadius)
     }
     if (!cavityFound)
     {
+        this->lastSplitFailure = "No boundary-preserving cavity could be constructed for the constrained edge";
         return false;
     }
     if (minRadius > 0.0 && !this->insertionAllowed(p,VertexSegment,minRadius,{a,b}))
@@ -1284,26 +1436,36 @@ bool RBoundaryRecovery::splitSubSegment(int segmentID, double minRadius)
 
 bool RBoundaryRecovery::splitSubFace(int faceID, double minRadius)
 {
-    return this->splitSubFaceAt(faceID,minRadius,false);
+    this->lastSplitFailure = "No valid boundary cavity could be constructed";
+    if (this->splitSubFaceAt(faceID,minRadius,false)) return true;
+    // Recovery may use an interior point when the circumcenter hits a protected
+    // edge, an existing vertex, or an invalid cavity. Refinement keeps its sizing
+    // and encroachment safeguards and does not take this recovery-only fallback.
+    return minRadius == 0.0 && this->splitSubFaceAt(faceID,minRadius,true);
 }
 
 bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centroid)
 {
+    auto fail = [&](const char *reason) { this->lastSplitFailure = reason;return false; };
     const SubFace face = this->faces[size_t(faceID)];
 
     double center[3], radius;
     if (!findCircumcircle(this->mesh.getPoint(face.v[0]),this->mesh.getPoint(face.v[1]),this->mesh.getPoint(face.v[2]),center,radius))
     {
-        return false;
+        return fail("Triangle has a degenerate or non-finite circumcircle");
     }
     if (!(radius > this->minLength))
     {
-        return false;
+        return fail("Triangle circumradius is at or below the minimum split length");
     }
 
     if (centroid)
     {
-        for (int i=0;i<3;i++) center[i]=(this->mesh.getPoint(face.v[0])[i]+this->mesh.getPoint(face.v[1])[i]+this->mesh.getPoint(face.v[2])[i])/3.0;
+        for (int i=0;i<3;i++)
+        {
+            const double a = this->mesh.getPoint(face.v[0])[i];
+            center[i] = a+((this->mesh.getPoint(face.v[1])[i]-a)+(this->mesh.getPoint(face.v[2])[i]-a))/3.0;
+        }
     }
     const FacetLocation location = this->locateInFacet(faceID,center);
     if (location.segmentID >= 0)
@@ -1313,7 +1475,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
     }
     if (location.faceID < 0)
     {
-        return false;
+        return fail("Split point could not be located in the surface facet");
     }
 
     // During quality refinement protect subsegments' diametral spheres. Recovery
@@ -1357,7 +1519,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
         const double *a=this->mesh.getPoint(location.edge[0]), *b=this->mesh.getPoint(location.edge[1]);
         double edge[3],offset[3];subtract(b,a,edge);subtract(center,a,offset);
         const double ratio=dot(offset,edge)/dot(edge,edge);
-        if (!(ratio>0.0 && ratio<1.0)) return false;
+        if (!(ratio>0.0 && ratio<1.0)) return fail("Split point is not strictly inside the facet edge");
         for (int i=0;i<3;i++) p[i]=a[i]+ratio*edge[i];
     }
 
@@ -1368,7 +1530,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
         auto iter = this->edgeFaces.find(findEdgeKey(location.edge[0],location.edge[1]));
         if (iter == this->edgeFaces.end() || iter->second.size() != 2)
         {
-            return false;
+            return fail("Facet edge does not have exactly two incident surface triangles");
         }
         startFaceIDs = iter->second;
     }
@@ -1387,7 +1549,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
             const SubFace &rStart = this->faces[size_t(startID)];
             if (duplicateID == rStart.v[0] || duplicateID == rStart.v[1] || duplicateID == rStart.v[2])
             {
-                return false;
+                return fail("Split point rounds to an existing triangle vertex");
             }
         }
         std::vector<uint64_t> edgeStack;
@@ -1441,8 +1603,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
     }
     if (!cavityFound)
     {
-        // A failed circumcenter is retried once at an interior barycentric point.
-        return !centroid && minRadius==0.0 && this->splitSubFaceAt(faceID,minRadius,true);
+        return fail("No boundary-preserving cavity could be constructed at the split point");
     }
 
     // A subsegment which would be removed is split instead.
@@ -1453,7 +1614,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
     }
     if (minRadius > 0.0 && !this->insertionAllowed(p,VertexFacet,minRadius,{target.v[0],target.v[1],target.v[2]}))
     {
-        return false;
+        return fail("Split would violate the refinement spacing safeguard");
     }
 
     const int vertexID = this->insertCavityPoint(p,VertexFacet,minRadius,{target.v[0],target.v[1],target.v[2]});
@@ -1476,7 +1637,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
 
 void RBoundaryRecovery::recoverSubFace(int faceID)
 {
-    if (this->matchSubFace(faceID))
+    if (this->matchSubFace(faceID) || this->matchFacet(faceID))
     {
         return;
     }
@@ -1490,9 +1651,14 @@ void RBoundaryRecovery::recoverSubFace(int faceID)
         const double *pa = this->mesh.getPoint(rFace.v[0]);
         const double *pb = this->mesh.getPoint(rFace.v[1]);
         const double *pc = this->mesh.getPoint(rFace.v[2]);
+        double center[3], radius = std::numeric_limits<double>::quiet_NaN();
+        findCircumcircle(pa,pb,pc,center,radius);
         throw RError(RError::Type::Application,R_ERROR_REF,
-                     "Failed to recover boundary, a triangle between nodes (%g %g %g), (%g %g %g) and (%g %g %g) can not be split. "
-                     "Surface may intersect itself or its parts may be too close to each other.",
+                     "Failed to recover boundary triangle %d (nodes %d, %d, %d, surface marker %d): %s. "
+                     "Circumradius = %.17g, minimum split length = %.17g. "
+                     "Coordinates: (%.17g %.17g %.17g), (%.17g %.17g %.17g), (%.17g %.17g %.17g). "
+                     "Boundary recovery did not converge; this does not establish a surface intersection.",
+                     faceID,rFace.v[0],rFace.v[1],rFace.v[2],rFace.marker,this->lastSplitFailure,radius,this->minLength,
                      pa[0],pa[1],pa[2],pb[0],pb[1],pb[2],pc[0],pc[1],pc[2]);
     }
 }
@@ -1517,8 +1683,11 @@ void RBoundaryRecovery::recover()
                     const double *pa = this->mesh.getPoint(a);
                     const double *pb = this->mesh.getPoint(b);
                     throw RError(RError::Type::Application,R_ERROR_REF,
-                                 "Failed to recover boundary, an edge between nodes (%g %g %g) and (%g %g %g) can not be split. "
-                                 "Surface may intersect itself or its parts may be too close to each other.",
+                                 "Failed to recover boundary edge %d (nodes %d, %d, marker %d): %s. "
+                                 "Edge length = %.17g, minimum split length = %.17g. "
+                                 "Coordinates: (%.17g %.17g %.17g), (%.17g %.17g %.17g). "
+                                 "Boundary recovery did not converge; this does not establish a surface intersection.",
+                                 segmentID,a,b,rSegment.marker,this->lastSplitFailure,distance(pa,pb),this->minLength,
                                  pa[0],pa[1],pa[2],pb[0],pb[1],pb[2]);
                 }
             }
@@ -1784,6 +1953,8 @@ void RBoundaryRecovery::copyState(const RBoundaryRecovery &source)
     this->replacedMarks=source.replacedMarks;
     this->replacedStamp=source.replacedStamp;
     this->facetMarks=source.facetMarks;
+    this->facetMatchPoints=source.facetMatchPoints;
+    this->lastSplitFailure=source.lastSplitFailure;
     this->facetStamp=source.facetStamp;
     this->collectCreatedTetras=source.collectCreatedTetras;
     this->createdTetras=source.createdTetras;

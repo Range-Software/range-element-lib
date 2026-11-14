@@ -1,4 +1,6 @@
 #include <QTest>
+#include <QScopeGuard>
+#include <rbl_progress.h>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QJsonDocument>
@@ -397,6 +399,7 @@ private slots:
 
     void chabot_data();
     void chabot();
+    void progressReporting();
     void box();
     void boxQuality();
     void boxSizeFunction();
@@ -504,6 +507,59 @@ void TestTetraMesher::chabot()
         volume += (a.x*(b.y*c.z-b.z*c.y) + a.y*(b.z*c.x-b.x*c.z) + a.z*(b.x*c.y-b.y*c.x)) / 6.0;
     }
     QVERIFY(std::fabs(findTotalVolume(output) - std::fabs(volume)) < 1.0e-12);
+}
+
+void TestTetraMesher::progressReporting()
+{
+    static std::vector<std::pair<QString,bool>> phases;
+    static std::vector<double> fractions;
+    static bool active;
+    phases.clear();
+    fractions.clear();
+    active = false;
+    auto &progress = RProgress::getInstance();
+    const RProgress previous = progress;
+    const auto restore = qScopeGuard([&]() { progress = previous; });
+    progress.setPrintToLog(false);
+    progress.setProgressInitializeHandler([](const QString &text, bool pulse) {
+        phases.emplace_back(text,pulse);
+        active = true;
+    });
+    progress.setProgressPrintHandler([](double fraction) { fractions.push_back(fraction); });
+    progress.setProgressFinalizeHandler([](const QString &) { active = false; });
+
+    RTetraMeshData input, output;
+    addBox(input,0,0,0,1,1,1,0);
+    QVERIFY(generate(input,createOptions(true),output)); // Also reports with verbose logging off.
+    QVERIFY(!active);
+    auto hasPhase = [&](const QString &text, bool pulse) {
+        return std::any_of(phases.begin(),phases.end(),[&](const auto &phase) {
+            return phase.first.contains(text) && phase.second == pulse;
+        });
+    };
+    QVERIFY(hasPhase("Tetrahedralizing",true));
+    QVERIFY(hasPhase("Recovering mesh boundary",true));
+    QVERIFY(hasPhase("Refining mesh",true));
+    QVERIFY(hasPhase("sweep",false));
+    QVERIFY(hasPhase("bounded patch repairs",true));
+    QVERIFY(hasPhase("Checking mesh quality",true));
+    QVERIFY(!fractions.empty());
+    for (double fraction : fractions)
+    {
+        QVERIFY(std::isfinite(fraction) && fraction >= 0.0 && fraction <= 1.0);
+    }
+
+    phases.clear();
+    QVERIFY(generate(input,createOptions(false),output));
+    QVERIFY(!active);
+    QVERIFY(!hasPhase("Refining mesh",true));
+    QVERIFY(hasPhase("Preparing generated mesh output",true));
+    QVERIFY(hasPhase("Checking mesh quality",true));
+
+    // Exceptions must close the progress indicator as well.
+    RTetraMeshData invalid;
+    QVERIFY_THROWS_EXCEPTION(RError,RTetraMesher::generate(invalid,createOptions(false),output));
+    QVERIFY(!active);
 }
 
 void TestTetraMesher::box()

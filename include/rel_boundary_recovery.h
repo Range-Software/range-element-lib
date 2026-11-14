@@ -165,6 +165,10 @@ class RBoundaryRecovery
         //! Marks of subfaces visited while a facet is searched.
         std::vector<unsigned int> facetMarks;
         unsigned int facetStamp;
+        //! Point count of the last planar-patch matching attempt for each subface.
+        std::vector<int> facetMatchPoints;
+        //! Detailed reason for the most recent unsuccessful split.
+        const char *lastSplitFailure = "No valid boundary cavity could be constructed";
         //! Function telling whether a face of a tetrahedron blocks a cavity.
         std::function<bool(int,int)> blockedFunction;
 
@@ -230,6 +234,9 @@ class RBoundaryRecovery
 
         //! Change triangulation of a facet to the one found in the tetrahedralization.
         bool matchSubFace(int faceID);
+
+        //! Adopt a validated triangulation of a bounded planar patch from the volume mesh.
+        bool matchFacet(int faceID);
 
         //! Find subface of the same facet which contains a point lying in plane of given subface.
         FacetLocation locateInFacet(int faceID, const double *p) const;

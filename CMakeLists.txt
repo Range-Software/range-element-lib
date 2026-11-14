@@ -8,6 +8,7 @@ qt_add_library(range-element-lib
         src/rel_tetra_mesh_data.cpp
         src/rel_tetra_mesh_options.cpp
         src/rel_tetra_mesh_refiner.cpp
+        src/rel_tetra_mesh_progress.h
         src/rel_tetra_mesher.cpp
         src/rel_tetra_mesh_quality.cpp
         src/rel_tetra_mesh_optimizer.cpp
