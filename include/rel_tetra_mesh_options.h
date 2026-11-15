@@ -98,9 +98,15 @@ class RTetraMeshOptions
         void setElementOrder(int elementOrder);
 
         //! Optional JSON diagnostic export. Empty means no file is written.
-        const std::string &getQualityReportPath() const { return qualityReportPath; }
-        void setQualityReportPath(const std::string &path) { qualityReportPath=path; }
+        const std::string &getQualityReportPath() const
+        {
+            return qualityReportPath;
+        }
 
+        void setQualityReportPath(const std::string &path)
+        {
+            qualityReportPath = path;
+        }
 };
 
 #endif // REL_TETRA_MESH_OPTIONS_H

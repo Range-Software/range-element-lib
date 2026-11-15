@@ -35,7 +35,10 @@ triangulated surface.
   recovery, refinement, optimization, output preparation and diagnostics. Refinement
   scans and optimization sweeps report percentage progress; adaptive queues pulse
   with work counts. Updates are throttled, status text is mirrored to the log without
-  percentages, and progress is finalized on success or exception
+  percentages. Phases with additional log output have a timed, indented section;
+  phases without it print only their status line. Work-count updates stay within
+  the current section. Progress and log indentation are finalized on success or
+  exception
 - **RBoundaryRecovery** can adopt a bounded planar patch's triangulation from the
   tetrahedral mesh before adding more vertices. The replacement is committed only
   after checking the patch boundary, constrained edges, vertex set, area, orientation

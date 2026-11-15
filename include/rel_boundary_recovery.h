@@ -77,7 +77,7 @@ class RBoundaryRecovery
         {
             int v[3];
 
-            bool operator ==(const FaceKey &key) const
+            bool operator==(const FaceKey &key) const
             {
                 return this->v[0] == key.v[0] && this->v[1] == key.v[1] && this->v[2] == key.v[2];
             }
@@ -85,11 +85,9 @@ class RBoundaryRecovery
 
         struct FaceKeyHash
         {
-            size_t operator ()(const FaceKey &key) const
+            size_t operator()(const FaceKey &key) const
             {
-                return size_t(  (uint64_t(key.v[0]) * 73856093ULL)
-                              ^ (uint64_t(key.v[1]) * 19349663ULL)
-                              ^ (uint64_t(key.v[2]) * 83492791ULL));
+                return size_t((uint64_t(key.v[0]) * 73856093ULL) ^ (uint64_t(key.v[1]) * 19349663ULL) ^ (uint64_t(key.v[2]) * 83492791ULL));
             }
         };
 
@@ -120,7 +118,7 @@ class RBoundaryRecovery
             //! Whether the point lies on an edge of the subface.
             bool onEdge = false;
             //! Vertices of the edge which the point lies on.
-            int edge[2] = {-1,-1};
+            int edge[2] = {-1, -1};
             //! All visited subfaces.
             std::vector<int> visitedFaceIDs;
         };
@@ -138,11 +136,11 @@ class RBoundaryRecovery
         std::vector<SubFace> faces;
 
         //! Subsegment of each edge.
-        std::unordered_map<uint64_t,int> segmentMap;
+        std::unordered_map<uint64_t, int> segmentMap;
         //! Subface of each triple of vertices.
-        std::unordered_map<FaceKey,int,FaceKeyHash> faceMap;
+        std::unordered_map<FaceKey, int, FaceKeyHash> faceMap;
         //! Subfaces sharing each edge.
-        std::unordered_map<uint64_t,std::vector<int>> edgeFaces;
+        std::unordered_map<uint64_t, std::vector<int>> edgeFaces;
 
         //! Subsegments which have to be checked for presence in the tetrahedralization.
         std::vector<int> segmentQueue;
@@ -170,7 +168,7 @@ class RBoundaryRecovery
         //! Detailed reason for the most recent unsuccessful split.
         const char *lastSplitFailure = "No valid boundary cavity could be constructed";
         //! Function telling whether a face of a tetrahedron blocks a cavity.
-        std::function<bool(int,int)> blockedFunction;
+        std::function<bool(int, int)> blockedFunction;
 
         //! Number of added vertices of each type.
         uint64_t nSteinerVertices[nVertexTypes];
@@ -224,7 +222,6 @@ class RBoundaryRecovery
         //! Return subsegment which would be removed if the current cavity of the mesh would be filled, -1 if there is none.
         int findLostSubSegment(int exceptSegmentID) const;
 
-
         //! Flip an edge shared by two subfaces if it is allowed by given mode.
         //! Vertices opposite to the edge are returned.
         bool flipEdge(int a, int b, FlipMode mode, int &c, int &d);
@@ -277,8 +274,12 @@ class RBoundaryRecovery
 
         //! Return type of a vertex.
         VertexType getVertexType(int vertexID) const;
+
         //! Also covers an interior vertex subsequently adopted by a recovered facet.
-        bool isBoundaryVertex(int vertexID) const { return boundaryVertices[size_t(vertexID)]!=0; }
+        bool isBoundaryVertex(int vertexID) const
+        {
+            return boundaryVertices[size_t(vertexID)] != 0;
+        }
 
         //! Add triangle of the boundary.
         void addTriangle(int a, int b, int c, int marker);
@@ -350,7 +351,6 @@ class RBoundaryRecovery
 
         //! Return collected tetrahedra. Some of them may be removed or replaced already.
         std::vector<int> &getCreatedTetras();
-
 };
 
 #endif // REL_BOUNDARY_RECOVERY_H

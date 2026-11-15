@@ -28,7 +28,7 @@ class RTetraMeshRefiner
             //! Priority of refinement.
             double priority = 0.0;
             //! Center of circumscribed sphere.
-            double center[3] = {0.0,0.0,0.0};
+            double center[3] = {0.0, 0.0, 0.0};
             //! Radius of circumscribed sphere.
             double radius = 0.0;
             //! Length of the shortest edge.
@@ -45,7 +45,7 @@ class RTetraMeshRefiner
             int v[4];
             int nAttempts;
 
-            bool operator <(const BadTetra &badTetra) const
+            bool operator<(const BadTetra &badTetra) const
             {
                 return this->priority < badTetra.priority;
             }
@@ -86,14 +86,24 @@ class RTetraMeshRefiner
 
         //! Return whether the refinement was stopped before all tetrahedra were refined.
         bool getStopped() const;
-        uint64_t getSpacingRejections() const { return spacingRejections; }
-        uint64_t getBoundaryRejections() const { return boundaryRejections; }
 
-        const RTetraMeshProfile &getProfile() const { return profile; }
+        uint64_t getSpacingRejections() const
+        {
+            return spacingRejections;
+        }
+
+        uint64_t getBoundaryRejections() const
+        {
+            return boundaryRejections;
+        }
+
+        const RTetraMeshProfile &getProfile() const
+        {
+            return profile;
+        }
 
         //! Refine mesh.
         void refine();
-
 };
 
 #endif // REL_TETRA_MESH_REFINER_H

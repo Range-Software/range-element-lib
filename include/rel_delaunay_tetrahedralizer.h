@@ -12,7 +12,9 @@ class RDelaunayTetrahedralizer
     private:
 
         //! Constructor.
-        RDelaunayTetrahedralizer() {}
+        RDelaunayTetrahedralizer()
+        {
+        }
 
     public:
 
@@ -21,7 +23,6 @@ class RDelaunayTetrahedralizer
         //! tetrahedra with it, are not inserted. Position of the inserted point is set to duplicates
         //! for them, -1 is set for all other points.
         static void tetrahedralize(RTetraMesh &mesh, std::vector<int> &duplicates);
-
 };
 
 #endif // REL_DELAUNAY_TETRAHEDRALIZER_H

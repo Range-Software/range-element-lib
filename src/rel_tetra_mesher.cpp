@@ -37,7 +37,7 @@ namespace
         {
             if (!std::isfinite(rNode.x) || !std::isfinite(rNode.y) || !std::isfinite(rNode.z))
             {
-                throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Node coordinates are not finite numbers.");
+                throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Node coordinates are not finite numbers.");
             }
         }
         for (const RTetraMeshData::Edge &rEdge : input.getEdges())
@@ -46,7 +46,7 @@ namespace
             {
                 if (nodeID < 0 || nodeID >= nNodes)
                 {
-                    throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Edge refers to a node which does not exist (%d).",nodeID);
+                    throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Edge refers to a node which does not exist (%d).", nodeID);
                 }
             }
         }
@@ -56,7 +56,7 @@ namespace
             {
                 if (nodeID < 0 || nodeID >= nNodes)
                 {
-                    throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Triangle refers to a node which does not exist (%d).",nodeID);
+                    throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Triangle refers to a node which does not exist (%d).", nodeID);
                 }
             }
         }
@@ -68,7 +68,7 @@ namespace
                 {
                     if (nodeID < 0 || nodeID >= nNodes)
                     {
-                        throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Tetrahedron refers to a node which does not exist (%d).",nodeID);
+                        throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Tetrahedron refers to a node which does not exist (%d).", nodeID);
                     }
                 }
             }
@@ -76,33 +76,34 @@ namespace
     }
 
     //! Find faces of input tetrahedra which lie on a boundary of a region.
-    std::vector<std::array<int,3>> findRegionFaces(const RTetraMeshData &input, const std::vector<int> &nodeMap)
+    std::vector<std::array<int, 3>> findRegionFaces(const RTetraMeshData &input, const std::vector<int> &nodeMap)
     {
-        static const int faceNodes[4][3] = {{1,3,2},{0,2,3},{0,3,1},{0,1,2}};
+        static const int faceNodes[4][3] = {{1, 3, 2}, {0, 2, 3}, {0, 3, 1}, {0, 1, 2}};
 
         struct FaceInfo
         {
-            std::array<int,3> nodeIDs;
+            std::array<int, 3> nodeIDs;
             int marker;
             int count;
             bool boundary;
         };
-        std::map<std::array<int,3>,FaceInfo> faces;
+
+        std::map<std::array<int, 3>, FaceInfo> faces;
 
         for (const RTetraMeshData::Tetrahedron &rTetrahedron : input.getTetrahedra())
         {
-            for (int i=0;i<4;i++)
+            for (int i = 0; i < 4; i++)
             {
-                const std::array<int,3> nodeIDs = {nodeMap[size_t(rTetrahedron.nodeIDs[faceNodes[i][0]])],
-                                                   nodeMap[size_t(rTetrahedron.nodeIDs[faceNodes[i][1]])],
-                                                   nodeMap[size_t(rTetrahedron.nodeIDs[faceNodes[i][2]])]};
-                std::array<int,3> key = nodeIDs;
-                std::sort(key.begin(),key.end());
+                const std::array<int, 3> nodeIDs = {nodeMap[size_t(rTetrahedron.nodeIDs[faceNodes[i][0]])],
+                                                    nodeMap[size_t(rTetrahedron.nodeIDs[faceNodes[i][1]])],
+                                                    nodeMap[size_t(rTetrahedron.nodeIDs[faceNodes[i][2]])]};
+                std::array<int, 3> key = nodeIDs;
+                std::sort(key.begin(), key.end());
 
                 auto iter = faces.find(key);
                 if (iter == faces.end())
                 {
-                    faces[key] = FaceInfo{nodeIDs,rTetrahedron.marker,1,false};
+                    faces[key] = FaceInfo{nodeIDs, rTetrahedron.marker, 1, false};
                 }
                 else
                 {
@@ -115,7 +116,7 @@ namespace
             }
         }
 
-        std::vector<std::array<int,3>> regionFaces;
+        std::vector<std::array<int, 3>> regionFaces;
         for (const auto &rItem : faces)
         {
             if (rItem.second.count == 1 || rItem.second.boundary)
@@ -134,16 +135,16 @@ namespace
         {
             double x[4][3];
             bool outside = false;
-            for (int j=0;j<3 && !outside;j++)
+            for (int j = 0; j < 3 && !outside; j++)
             {
                 double lower = std::numeric_limits<double>::max();
                 double upper = std::numeric_limits<double>::lowest();
-                for (int i=0;i<4;i++)
+                for (int i = 0; i < 4; i++)
                 {
                     const RTetraMeshData::Node &rNode = rNodes[size_t(rTetrahedron.nodeIDs[i])];
                     x[i][j] = j == 0 ? rNode.x : (j == 1 ? rNode.y : rNode.z);
-                    lower = std::min(lower,x[i][j]);
-                    upper = std::max(upper,x[i][j]);
+                    lower = std::min(lower, x[i][j]);
+                    upper = std::max(upper, x[i][j]);
                 }
                 outside = p[j] < lower || p[j] > upper;
             }
@@ -151,16 +152,13 @@ namespace
             {
                 continue;
             }
-            const double orientation = RGeometricPredicates::orient3d(x[0],x[1],x[2],x[3]);
+            const double orientation = RGeometricPredicates::orient3d(x[0], x[1], x[2], x[3]);
             if (orientation == 0.0)
             {
                 continue;
             }
             const double sign = orientation > 0.0 ? 1.0 : -1.0;
-            if (   sign * RGeometricPredicates::orient3d(x[1],x[3],x[2],p) >= 0.0
-                && sign * RGeometricPredicates::orient3d(x[0],x[2],x[3],p) >= 0.0
-                && sign * RGeometricPredicates::orient3d(x[0],x[3],x[1],p) >= 0.0
-                && sign * RGeometricPredicates::orient3d(x[0],x[1],x[2],p) >= 0.0)
+            if (sign * RGeometricPredicates::orient3d(x[1], x[3], x[2], p) >= 0.0 && sign * RGeometricPredicates::orient3d(x[0], x[2], x[3], p) >= 0.0 && sign * RGeometricPredicates::orient3d(x[0], x[3], x[1], p) >= 0.0 && sign * RGeometricPredicates::orient3d(x[0], x[1], x[2], p) >= 0.0)
             {
                 marker = rTetrahedron.marker;
                 return true;
@@ -173,7 +171,7 @@ namespace
 
 void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output)
 {
-    generate(input,options,output,nullptr);
+    generate(input, options, output, nullptr);
 }
 
 void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *resultProfile)
@@ -185,49 +183,52 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     const int nInputNodes = int(rInputNodes.size());
     const bool reconstruct = options.getReconstruct() && !input.getTetrahedra().empty();
 
-    validateInput(input,reconstruct);
+    validateInput(input, reconstruct);
 
     if (options.getElementOrder() != 1 && options.getElementOrder() != 2)
     {
-        throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Order of generated elements must be 1 or 2 (%d).",options.getElementOrder());
+        throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Order of generated elements must be 1 or 2 (%d).", options.getElementOrder());
     }
 
     if (input.getTriangles().empty() && !reconstruct)
     {
-        throw RError(RError::Type::InvalidInput,R_ERROR_REF,"There are no triangles to generate tetrahedra from.");
+        throw RError(RError::Type::InvalidInput, R_ERROR_REF, "There are no triangles to generate tetrahedra from.");
     }
 
     // Delaunay tetrahedralization of input nodes.
 
     RTetraMesh mesh;
-    mesh.setCoplanarTolerance(std::max(options.getTolerance(),1.0e-12));
-    double lower[3] = {0.0,0.0,0.0};
-    double upper[3] = {0.0,0.0,0.0};
-    for (int i=0;i<nInputNodes;i++)
+    mesh.setCoplanarTolerance(std::max(options.getTolerance(), 1.0e-12));
+    double lower[3] = {0.0, 0.0, 0.0};
+    double upper[3] = {0.0, 0.0, 0.0};
+    for (int i = 0; i < nInputNodes; i++)
     {
-        const double x[3] = {rInputNodes[size_t(i)].x,rInputNodes[size_t(i)].y,rInputNodes[size_t(i)].z};
-        mesh.addPoint(x[0],x[1],x[2]);
-        for (int j=0;j<3;j++)
+        const double x[3] = {rInputNodes[size_t(i)].x, rInputNodes[size_t(i)].y, rInputNodes[size_t(i)].z};
+        mesh.addPoint(x[0], x[1], x[2]);
+        for (int j = 0; j < 3; j++)
         {
-            lower[j] = i == 0 ? x[j] : std::min(lower[j],x[j]);
-            upper[j] = i == 0 ? x[j] : std::max(upper[j],x[j]);
+            lower[j] = i == 0 ? x[j] : std::min(lower[j], x[j]);
+            upper[j] = i == 0 ? x[j] : std::max(upper[j], x[j]);
         }
     }
-    const double modelSize = std::hypot(upper[0]-lower[0],upper[1]-lower[1],upper[2]-lower[2]);
-
-    if (options.getVerbose())
-    {
-        RLogger::info("Tetrahedralizing %d nodes.\n",nInputNodes);
-    }
+    const double modelSize = std::hypot(upper[0] - lower[0], upper[1] - lower[1], upper[2] - lower[2]);
 
     progress.initialize("Tetrahedralizing nodes");
+    if (options.getVerbose())
+    {
+        progress.beginLog();
+        RLogger::info("Tetrahedralizing %d nodes.\n", nInputNodes);
+    }
+
     std::vector<int> duplicates;
-    { RTetraMeshProfile::Timer timer(profile.tetrahedralization);
-      RDelaunayTetrahedralizer::tetrahedralize(mesh,duplicates); }
+    {
+        RTetraMeshProfile::Timer timer(profile.tetrahedralization);
+        RDelaunayTetrahedralizer::tetrahedralize(mesh, duplicates);
+    }
 
     std::vector<int> nodeMap(static_cast<size_t>(nInputNodes));
     int nDuplicates = 0;
-    for (int i=0;i<nInputNodes;i++)
+    for (int i = 0; i < nInputNodes; i++)
     {
         nodeMap[size_t(i)] = duplicates[size_t(i)] >= 0 ? duplicates[size_t(i)] : i;
         if (duplicates[size_t(i)] >= 0)
@@ -237,24 +238,25 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
     if (nDuplicates > 0)
     {
-        RLogger::warning("Found %d nodes with the same or nearly the same coordinates as other nodes, they are not used in generated mesh.\n",nDuplicates);
+        progress.beginLog();
+        RLogger::warning("Found %d nodes with the same or nearly the same coordinates as other nodes, they are not used in generated mesh.\n", nDuplicates);
     }
 
     // Boundary.
 
     progress.initialize("Recovering mesh boundary");
     RTetraMeshProfile::Timer boundaryTimer(profile.boundary);
-    RBoundaryRecovery boundary(mesh,options.getTolerance());
+    RBoundaryRecovery boundary(mesh, options.getTolerance());
     boundary.setMinLength(minLengthRatio * modelSize);
 
     if (options.getUseSizeFunction())
     {
-        for (int i=0;i<nInputNodes;i++)
+        for (int i = 0; i < nInputNodes; i++)
         {
             const double size = rInputNodes[size_t(i)].size;
             if (size > 0.0 && boundary.getVertexSize(nodeMap[size_t(i)]) <= 0.0)
             {
-                boundary.setVertexSize(nodeMap[size_t(i)],size);
+                boundary.setVertexSize(nodeMap[size_t(i)], size);
             }
         }
     }
@@ -269,30 +271,32 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     if (reconstruct)
     {
         // Regions of input mesh do not have to be separated by triangles.
-        for (const std::array<int,3> &rFace : findRegionFaces(input,nodeMap))
+        for (const std::array<int, 3> &rFace : findRegionFaces(input, nodeMap))
         {
-            boundary.addTriangle(rFace[0],rFace[1],rFace[2],RBoundaryRecovery::noMarker);
+            boundary.addTriangle(rFace[0], rFace[1], rFace[2], RBoundaryRecovery::noMarker);
         }
     }
     for (const RTetraMeshData::Edge &rEdge : input.getEdges())
     {
-        boundary.addEdge(nodeMap[size_t(rEdge.nodeIDs[0])],nodeMap[size_t(rEdge.nodeIDs[1])],rEdge.marker);
+        boundary.addEdge(nodeMap[size_t(rEdge.nodeIDs[0])], nodeMap[size_t(rEdge.nodeIDs[1])], rEdge.marker);
     }
 
     if (options.getVerbose())
     {
+        progress.beginLog();
         RLogger::info("Recovering boundary.\n");
     }
 
     const uint64_t maxSteinerNodes = options.getMaxSteinerNodes() > 0 ? uint64_t(options.getMaxSteinerNodes()) : defaultMaxSteinerNodes;
 
     // Recovery which does not converge is stopped by a limit of its own, unless the limit given by options is lower.
-    boundary.setMaxSteinerVertices(std::min(maxSteinerNodes,100 * uint64_t(nInputNodes) + 100000));
+    boundary.setMaxSteinerVertices(std::min(maxSteinerNodes, 100 * uint64_t(nInputNodes) + 100000));
     boundary.initialize();
     boundary.recover();
 
     if (options.getVerbose())
     {
+        progress.beginLog();
         RLogger::info("Boundary was recovered with %llu nodes added on edges and %llu nodes added on triangles.\n",
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexSegment)),
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexFacet)));
@@ -302,12 +306,16 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     int nRegions = boundary.classifyRegions();
     if (nRegions == 0)
     {
-        throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Triangles do not enclose any volume.");
+        throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Triangles do not enclose any volume.");
     }
 
+    progress.finalize();
     boundaryTimer.finish();
-    RTetraMeshOptimizer optimizer(mesh,boundary,options);
-    { RTetraMeshProfile::Timer timer(profile.initialRepair);optimizer.optimize(false); }
+    RTetraMeshOptimizer optimizer(mesh, boundary, options);
+    {
+        RTetraMeshProfile::Timer timer(profile.initialRepair);
+        optimizer.optimize(false);
+    }
 
     // Refinement.
 
@@ -322,7 +330,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         // The limit is checked before a tetrahedron is refined, which may need more than one node.
         boundary.setMaxSteinerVertices(std::numeric_limits<uint64_t>::max());
 
-        RTetraMeshRefiner refiner(mesh,boundary,options);
+        RTetraMeshRefiner refiner(mesh, boundary, options);
         refiner.setMinLength(minLengthRatio * modelSize);
         refiner.setMaxSteinerVertices(maxSteinerNodes);
         refiner.refine();
@@ -330,7 +338,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         if (options.getVerbose())
         {
             RLogger::info("Refinement safeguards rejected %llu interior insertions and %llu boundary splits; constrained cells may remain below requested quality.\n",
-                          static_cast<unsigned long long>(refiner.getSpacingRejections()),static_cast<unsigned long long>(refiner.getBoundaryRejections()));
+                          static_cast<unsigned long long>(refiner.getSpacingRejections()), static_cast<unsigned long long>(refiner.getBoundaryRejections()));
         }
 
         if (refiner.getStopped())
@@ -345,13 +353,17 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         nRegions = boundary.classifyRegions();
         if (nRegions == 0)
         {
-            throw RError(RError::Type::Application,R_ERROR_REF,"Boundary was lost during mesh refinement.");
+            throw RError(RError::Type::Application, R_ERROR_REF, "Boundary was lost during mesh refinement.");
         }
     }
 
+    progress.finalize();
     if (options.getQualityMesh())
     {
-        if (options.getVerbose()) RLogger::info("Optimizing mesh with bounded patch repairs.\n");
+        if (options.getVerbose())
+        {
+            RLogger::info("Optimizing mesh with bounded patch repairs.\n");
+        }
         RTetraMeshProfile::Timer timer(profile.optimization);
         optimizer.optimize();
     }
@@ -363,16 +375,16 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     std::vector<RTetraMeshData::Node> &rNodes = output.getNodes();
     rNodes = rInputNodes;
-    for (int i=nInputNodes;i<mesh.getNPoints();i++)
+    for (int i = nInputNodes; i < mesh.getNPoints(); i++)
     {
         const double *p = mesh.getPoint(i);
-        output.addNode(p[0],p[1],p[2],RTetraMeshData::noMarker,boundary.getVertexSize(i));
+        output.addNode(p[0], p[1], p[2], RTetraMeshData::noMarker, boundary.getVertexSize(i));
     }
 
     const int nSlots = mesh.getNTetraSlots();
-    std::vector<int> tetraMap(static_cast<size_t>(nSlots),RTetraMeshData::noTetrahedron);
+    std::vector<int> tetraMap(static_cast<size_t>(nSlots), RTetraMeshData::noTetrahedron);
     int nTetrahedra = 0;
-    for (int i=0;i<nSlots;i++)
+    for (int i = 0; i < nSlots; i++)
     {
         if (mesh.isAlive(i) && !mesh.isGhost(i) && mesh.getTetra(i).region >= 0)
         {
@@ -382,7 +394,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     // Markers of regions.
     std::vector<int> regionMarkers(static_cast<size_t>(nRegions));
-    for (int i=0;i<nRegions;i++)
+    for (int i = 0; i < nRegions; i++)
     {
         regionMarkers[size_t(i)] = i;
     }
@@ -391,12 +403,12 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         int maxMarker = -1;
         for (const RTetraMeshData::Tetrahedron &rTetrahedron : input.getTetrahedra())
         {
-            maxMarker = std::max(maxMarker,rTetrahedron.marker);
+            maxMarker = std::max(maxMarker, rTetrahedron.marker);
         }
 
-        std::vector<std::map<int,int>> votes(static_cast<size_t>(nRegions));
-        std::vector<int> nSamples(size_t(nRegions),0);
-        for (int i=0;i<nSlots;i++)
+        std::vector<std::map<int, int>> votes(static_cast<size_t>(nRegions));
+        std::vector<int> nSamples(size_t(nRegions), 0);
+        for (int i = 0; i < nSlots; i++)
         {
             if (tetraMap[size_t(i)] == RTetraMeshData::noTetrahedron)
             {
@@ -408,21 +420,21 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                 continue;
             }
             nSamples[size_t(rTetra.region)]++;
-            double center[3] = {0.0,0.0,0.0};
-            for (int j=0;j<4;j++)
+            double center[3] = {0.0, 0.0, 0.0};
+            for (int j = 0; j < 4; j++)
             {
-                for (int k=0;k<3;k++)
+                for (int k = 0; k < 3; k++)
                 {
                     center[k] += 0.25 * mesh.getPoint(rTetra.v[j])[k];
                 }
             }
             int marker;
-            if (findInputMarker(input,center,marker))
+            if (findInputMarker(input, center, marker))
             {
                 votes[size_t(rTetra.region)][marker]++;
             }
         }
-        for (int i=0;i<nRegions;i++)
+        for (int i = 0; i < nRegions; i++)
         {
             int bestCount = 0;
             int bestMarker = RTetraMeshData::noMarker;
@@ -441,7 +453,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     std::vector<RTetraMeshData::Tetrahedron> &rTetrahedra = output.getTetrahedra();
     rTetrahedra.reserve(size_t(nTetrahedra));
-    for (int i=0;i<nSlots;i++)
+    for (int i = 0; i < nSlots; i++)
     {
         if (tetraMap[size_t(i)] == RTetraMeshData::noTetrahedron)
         {
@@ -449,7 +461,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         }
         const RTetraMesh::Tetra &rTetra = mesh.getTetra(i);
         RTetraMeshData::Tetrahedron tetrahedron;
-        for (int j=0;j<4;j++)
+        for (int j = 0; j < 4; j++)
         {
             tetrahedron.nodeIDs[j] = rTetra.v[j];
             tetrahedron.neighborIDs[j] = tetraMap[size_t(rTetra.n[j])];
@@ -462,14 +474,14 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     {
         if (rFace.alive)
         {
-            output.addTriangle(rFace.v[0],rFace.v[1],rFace.v[2],rFace.marker);
+            output.addTriangle(rFace.v[0], rFace.v[1], rFace.v[2], rFace.marker);
         }
     }
     for (const RBoundaryRecovery::SubSegment &rSegment : boundary.getSubSegments())
     {
         if (rSegment.alive && rSegment.marker != RBoundaryRecovery::noMarker)
         {
-            output.addEdge(rSegment.v[0],rSegment.v[1],rSegment.marker);
+            output.addEdge(rSegment.v[0], rSegment.v[1], rSegment.marker);
         }
     }
 
@@ -485,39 +497,48 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     profile.addWork(optimizer.getProfile());
     progress.initialize("Checking mesh quality");
     RTetraMeshQuality::Summary quality;
-    { RTetraMeshProfile::Timer timer(profile.diagnostics);quality=RTetraMeshQuality::summarize(output,options); }
+    {
+        RTetraMeshProfile::Timer timer(profile.diagnostics);
+        quality = RTetraMeshQuality::summarize(output, options);
+    }
     totalTimer.finish(); // Excludes optional report serialization and logging.
     if (!options.getQualityReportPath().empty())
     {
         progress.initialize("Writing mesh quality report");
-        const RTetraMeshQuality::Work work={optimizer.getQueueVisits(),optimizer.getBudgetStops(),optimizer.getInsertedPoints(),optimizer.getOrderedVisits(),optimizer.getBoundaryPoints(),&profile};
-        RTetraMeshQuality::writeReport(output,options,optimizer.getPatchAttempts(),options.getQualityReportPath(),&work);
+        const RTetraMeshQuality::Work work = {optimizer.getQueueVisits(), optimizer.getBudgetStops(), optimizer.getInsertedPoints(), optimizer.getOrderedVisits(), optimizer.getBoundaryPoints(), &profile};
+        RTetraMeshQuality::writeReport(output, options, optimizer.getPatchAttempts(), options.getQualityReportPath(), &work);
     }
-    if (resultProfile) *resultProfile=profile;
+    if (resultProfile)
+    {
+        *resultProfile = profile;
+    }
     if (options.getVerbose())
     {
+        progress.beginLog();
         RLogger::info("Mesh phases (s): tetrahedralization %.3f, boundary %.3f, initial repair %.3f, refinement %.3f, optimization %.3f, diagnostics %.3f, total %.3f.\n",
-                      profile.tetrahedralization,profile.boundary,profile.initialRepair,profile.refinement,profile.optimization,profile.diagnostics,profile.total);
+                      profile.tetrahedralization, profile.boundary, profile.initialRepair, profile.refinement, profile.optimization, profile.diagnostics, profile.total);
         RLogger::info("Mesh work: %llu quality measurements, %llu quality cache hits, %llu star searches, %llu star cache hits, %llu local trial replacements.\n",
-                      static_cast<unsigned long long>(profile.qualityMeasurements),static_cast<unsigned long long>(profile.qualityCacheHits),
-                      static_cast<unsigned long long>(profile.starQueries),static_cast<unsigned long long>(profile.starCacheHits),static_cast<unsigned long long>(profile.trialReplacements));
+                      static_cast<unsigned long long>(profile.qualityMeasurements), static_cast<unsigned long long>(profile.qualityCacheHits),
+                      static_cast<unsigned long long>(profile.starQueries), static_cast<unsigned long long>(profile.starCacheHits), static_cast<unsigned long long>(profile.trialReplacements));
         RLogger::info("Volume optimization visited %llu local cell patches, accepted %llu off-centers and reached %llu queue budgets.\n",
-                      static_cast<unsigned long long>(optimizer.getQueueVisits()),static_cast<unsigned long long>(optimizer.getInsertedPoints()),static_cast<unsigned long long>(optimizer.getBudgetStops()));
+                      static_cast<unsigned long long>(optimizer.getQueueVisits()), static_cast<unsigned long long>(optimizer.getInsertedPoints()), static_cast<unsigned long long>(optimizer.getBudgetStops()));
         RLogger::info("Sub-degree angles: %llu elements have internal face pairs, %llu have prescribed face pairs (counts may overlap).\n",
-                      static_cast<unsigned long long>(quality.freeBelowOne),static_cast<unsigned long long>(quality.prescribedBelowOne));
+                      static_cast<unsigned long long>(quality.freeBelowOne), static_cast<unsigned long long>(quality.prescribedBelowOne));
         RLogger::info("Mesh quality: minimum dihedral = %g degrees, radius/edge p95 = %g, maximum = %g, nearly flat = %llu.\n",
-                      quality.minAngle,quality.radiusEdge95,quality.maxRadiusEdge,static_cast<unsigned long long>(quality.nearFlat));
+                      quality.minAngle, quality.radiusEdge95, quality.maxRadiusEdge, static_cast<unsigned long long>(quality.nearFlat));
     }
     if (options.getQualityMesh() && !quality.targetsMet())
     {
+        progress.beginLog();
         RLogger::warning("Mesh quality targets remain unmet: %llu radius/edge, %llu dihedral, %llu volume/size, %llu nearly flat, %llu invalid elements (%llu elements have geometry-constrained angles).\n",
-                         static_cast<unsigned long long>(quality.badRadius),static_cast<unsigned long long>(quality.badAngle),
-                         static_cast<unsigned long long>(quality.tooLarge),static_cast<unsigned long long>(quality.nearFlat),
-                         static_cast<unsigned long long>(quality.invalid),static_cast<unsigned long long>(quality.constrainedAngle));
+                         static_cast<unsigned long long>(quality.badRadius), static_cast<unsigned long long>(quality.badAngle),
+                         static_cast<unsigned long long>(quality.tooLarge), static_cast<unsigned long long>(quality.nearFlat),
+                         static_cast<unsigned long long>(quality.invalid), static_cast<unsigned long long>(quality.constrainedAngle));
     }
 
     if (options.getVerbose())
     {
+        progress.beginLog();
         RLogger::info("Generated %d tetrahedra in %d volumes with %llu nodes added (%llu on edges, %llu on triangles, %llu inside).\n",
                       nTetrahedra,
                       nRegions,
@@ -527,7 +548,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexVolume)));
         if (options.getElementOrder() == 2)
         {
-            RLogger::info("Elements are quadratic, %d nodes were added in the middle of edges.\n",nMidEdgeNodes);
+            RLogger::info("Elements are quadratic, %d nodes were added in the middle of edges.\n", nMidEdgeNodes);
         }
     }
 }

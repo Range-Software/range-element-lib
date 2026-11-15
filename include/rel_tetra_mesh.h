@@ -86,6 +86,7 @@ class RTetraMesh
         std::vector<int> cavityTetras;
         //! Faces of cavity tetrahedra which their neighbors do not belong to the cavity.
         std::vector<Face> cavityFaces;
+
         //! Edge of a cavity boundary face, which a new tetrahedron is connected to another one through.
         struct FaceLink
         {
@@ -96,6 +97,7 @@ class RTetraMesh
             //! Position of the neighbor in the new tetrahedron.
             int side;
         };
+
         //! Edges of boundary faces of the cavity sorted by their keys.
         std::vector<FaceLink> cavityLinks;
         //! Tetrahedra created when the last cavity was filled.
@@ -104,7 +106,7 @@ class RTetraMesh
     private:
 
         struct ReplacementUndo;
-        bool replaceTetrasImpl(const std::vector<int> &, const std::vector<std::array<int,4>> &, ReplacementUndo *);
+        bool replaceTetrasImpl(const std::vector<int> &, const std::vector<std::array<int, 4>> &, ReplacementUndo *);
 
         //! Return position of a new tetrahedron.
         int allocateTetra();
@@ -151,7 +153,7 @@ class RTetraMesh
         inline int findGhostIndex(int tetraID) const
         {
             const Tetra &rTetra = this->tetras[size_t(tetraID)];
-            for (int i=0;i<4;i++)
+            for (int i = 0; i < 4; i++)
             {
                 if (rTetra.v[i] == ghostVertex)
                 {
@@ -207,7 +209,7 @@ class RTetraMesh
         bool findCavity(const double *p,
                         int seedTetraID,
                         const std::vector<int> *pForcedTetras = nullptr,
-                        const std::function<bool(int,int)> *pIsBlocked = nullptr,
+                        const std::function<bool(int, int)> *pIsBlocked = nullptr,
                         bool exactVisibility = false);
 
         //! Return tetrahedra of the last found cavity.
@@ -237,7 +239,7 @@ class RTetraMesh
 
         //! Replace a finite, single-region cluster atomically. The oriented boundary must be identical.
         //! Invalid/nonmanifold proposals leave the mesh unchanged.
-        bool replaceTetras(const std::vector<int> &oldIDs, const std::vector<std::array<int,4>> &vertices);
+        bool replaceTetras(const std::vector<int> &oldIDs, const std::vector<std::array<int, 4>> &vertices);
 
         //! Scoped, nestable speculative replacements. Does not support point insertion
         //! or other mesh mutations while active. Rolls back every successful replacement.
@@ -245,15 +247,25 @@ class RTetraMesh
         {
             RTetraMesh &mesh;
             std::vector<ReplacementUndo *> undo;
-            size_t bytes=0;
-        public:
-            explicit ReplacementTrial(RTetraMesh &mesh):mesh(mesh){}
-            ~ReplacementTrial();
-            ReplacementTrial(const ReplacementTrial &)=delete;
-            ReplacementTrial &operator=(const ReplacementTrial &)=delete;
-            bool replace(const std::vector<int> &, const std::vector<std::array<int,4>> &);
-            void rollback();
-            size_t bytesSaved() const { return bytes; }
+            size_t bytes = 0;
+
+            public:
+
+                explicit ReplacementTrial(RTetraMesh &mesh)
+                    : mesh(mesh)
+                {
+                }
+
+                ~ReplacementTrial();
+                ReplacementTrial(const ReplacementTrial &) = delete;
+                ReplacementTrial &operator=(const ReplacementTrial &) = delete;
+                bool replace(const std::vector<int> &, const std::vector<std::array<int, 4>> &);
+                void rollback();
+
+                size_t bytesSaved() const
+                {
+                    return bytes;
+                }
         };
 
         //! Logical storage copied by a trial snapshot, excluding allocator overhead.
@@ -270,7 +282,6 @@ class RTetraMesh
 
         //! Find tetrahedron having a face, return false if there is none.
         bool findFace(int a, int b, int c, Face &face) const;
-
 };
 
 #endif // REL_TETRA_MESH_H

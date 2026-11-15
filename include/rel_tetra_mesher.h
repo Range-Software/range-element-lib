@@ -18,7 +18,9 @@ class RTetraMesher
     private:
 
         //! Constructor.
-        RTetraMesher() {}
+        RTetraMesher()
+        {
+        }
 
     public:
 
@@ -27,7 +29,6 @@ class RTetraMesher
         static void generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output);
         //! Generate and optionally return phase timings and optimizer work counters.
         static void generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *profile);
-
 };
 
 #endif // REL_TETRA_MESHER_H

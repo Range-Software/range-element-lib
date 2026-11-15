@@ -40,14 +40,14 @@ namespace
 
     inline double dot(const double *a, const double *b)
     {
-        return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     }
 
     inline void cross(const double *a, const double *b, double *r)
     {
-        r[0] = a[1]*b[2] - a[2]*b[1];
-        r[1] = a[2]*b[0] - a[0]*b[2];
-        r[2] = a[0]*b[1] - a[1]*b[0];
+        r[0] = a[1] * b[2] - a[2] * b[1];
+        r[1] = a[2] * b[0] - a[0] * b[2];
+        r[2] = a[0] * b[1] - a[1] * b[0];
     }
 
 }
@@ -93,40 +93,40 @@ RTetraMeshRefiner::Quality RTetraMeshRefiner::findQuality(int tetraID) const
                           this->mesh.getPoint(rTetra.v[3])};
 
     double u[3], v[3], w[3], vw[3], wu[3], uv[3];
-    subtract(p[1],p[0],u);
-    subtract(p[2],p[0],v);
-    subtract(p[3],p[0],w);
-    cross(v,w,vw);
-    cross(w,u,wu);
-    cross(u,v,uv);
+    subtract(p[1], p[0], u);
+    subtract(p[2], p[0], v);
+    subtract(p[3], p[0], w);
+    cross(v, w, vw);
+    cross(w, u, wu);
+    cross(u, v, uv);
 
-    const double det = dot(u,vw);
+    const double det = dot(u, vw);
     if (!(det > 0.0))
     {
         return quality;
     }
-    const double u2 = dot(u,u);
-    const double v2 = dot(v,v);
-    const double w2 = dot(w,w);
+    const double u2 = dot(u, u);
+    const double v2 = dot(v, v);
+    const double w2 = dot(w, w);
 
     double r[3];
-    for (int i=0;i<3;i++)
+    for (int i = 0; i < 3; i++)
     {
         r[i] = (u2 * vw[i] + v2 * wu[i] + w2 * uv[i]) / (2.0 * det);
         quality.center[i] = p[0][i] + r[i];
     }
-    quality.radius = std::sqrt(dot(r,r));
+    quality.radius = std::sqrt(dot(r, r));
     if (!std::isfinite(quality.radius))
     {
         return quality;
     }
 
     double minEdge2 = std::numeric_limits<double>::max();
-    for (int i=0;i<6;i++)
+    for (int i = 0; i < 6; i++)
     {
         double edge[3];
-        subtract(p[RTetraMesh::edgeVertices[i][1]],p[RTetraMesh::edgeVertices[i][0]],edge);
-        minEdge2 = std::min(minEdge2,dot(edge,edge));
+        subtract(p[RTetraMesh::edgeVertices[i][1]], p[RTetraMesh::edgeVertices[i][0]], edge);
+        minEdge2 = std::min(minEdge2, dot(edge, edge));
     }
     quality.minEdge = std::sqrt(minEdge2);
 
@@ -144,7 +144,7 @@ RTetraMeshRefiner::Quality RTetraMeshRefiner::findQuality(int tetraID) const
     {
         double sizeSum = 0.0;
         int nSizes = 0;
-        for (int i=0;i<4;i++)
+        for (int i = 0; i < 4; i++)
         {
             const double size = this->boundary.getVertexSize(rTetra.v[i]);
             if (size > 0.0)
@@ -158,10 +158,10 @@ RTetraMeshRefiner::Quality RTetraMeshRefiner::findQuality(int tetraID) const
             const double size = sizeSum / nSizes;
             if (quality.radius > sizeRadiusRatio * size)
             {
-                quality.targetEdge = quality.tooLarge ? std::min(quality.targetEdge,size) : size;
+                quality.targetEdge = quality.tooLarge ? std::min(quality.targetEdge, size) : size;
                 quality.bad = true;
                 quality.tooLarge = true;
-                quality.priority = std::max(quality.priority,quality.radius / (sizeRadiusRatio * size));
+                quality.priority = std::max(quality.priority, quality.radius / (sizeRadiusRatio * size));
             }
         }
     }
@@ -185,39 +185,38 @@ RTetraMeshRefiner::Quality RTetraMeshRefiner::findQuality(int tetraID) const
         // Normals of faces pointing inside of the tetrahedron.
         double normals[4][3];
         double lengths[4];
-        for (int i=0;i<4;i++)
+        for (int i = 0; i < 4; i++)
         {
             const int *pFace = RTetraMesh::faceVertices[i];
             double e1[3], e2[3];
-            subtract(p[pFace[1]],p[pFace[0]],e1);
-            subtract(p[pFace[2]],p[pFace[0]],e2);
-            cross(e1,e2,normals[i]);
-            lengths[i] = std::sqrt(dot(normals[i],normals[i]));
+            subtract(p[pFace[1]], p[pFace[0]], e1);
+            subtract(p[pFace[2]], p[pFace[0]], e2);
+            cross(e1, e2, normals[i]);
+            lengths[i] = std::sqrt(dot(normals[i], normals[i]));
         }
         const double limitCos = std::cos(this->options.getMinDihedralAngle() * pi / 180.0);
         double maxCos = -1.0;
-        for (int i=0;i<4;i++)
+        for (int i = 0; i < 4; i++)
         {
-            for (int j=i+1;j<4;j++)
+            for (int j = i + 1; j < 4; j++)
             {
                 if (!(lengths[i] > 0.0 && lengths[j] > 0.0))
                 {
                     continue;
                 }
-                const double angleCos = -dot(normals[i],normals[j]) / (lengths[i] * lengths[j]);
+                const double angleCos = -dot(normals[i], normals[j]) / (lengths[i] * lengths[j]);
                 if (angleCos > limitCos)
                 {
                     // Only the angle between two prescribed faces is fixed by geometry.
-                    if (this->boundary.findSubFace(RTetraMesh::Face{tetraID,i}) >= 0
-                        && this->boundary.findSubFace(RTetraMesh::Face{tetraID,j}) >= 0)
+                    if (this->boundary.findSubFace(RTetraMesh::Face{tetraID, i}) >= 0 && this->boundary.findSubFace(RTetraMesh::Face{tetraID, j}) >= 0)
                     {
                         continue;
                     }
                 }
-                maxCos = std::max(maxCos,angleCos);
+                maxCos = std::max(maxCos, angleCos);
             }
         }
-        const double minAngle = std::acos(std::min(1.0,std::max(-1.0,maxCos))) * 180.0 / pi;
+        const double minAngle = std::acos(std::min(1.0, std::max(-1.0, maxCos))) * 180.0 / pi;
         if (minAngle < this->options.getMinDihedralAngle())
         {
             quality.bad = true;
@@ -247,7 +246,7 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
     int previousID = RTetraMesh::noTetra;
     int seedID = RTetraMesh::noTetra;
     const uint64_t maxSteps = this->mesh.getNTetras() + 16;
-    for (uint64_t step=0;step<maxSteps && encroachment.type==RBoundaryRecovery::EncroachmentNone;step++)
+    for (uint64_t step = 0; step < maxSteps && encroachment.type == RBoundaryRecovery::EncroachmentNone; step++)
     {
         if (this->mesh.isGhost(currentID))
         {
@@ -255,7 +254,7 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
         }
         const RTetraMesh::Tetra &rTetra = this->mesh.getTetra(currentID);
         int nextID = RTetraMesh::noTetra;
-        for (int k=0;k<4;k++)
+        for (int k = 0; k < 4; k++)
         {
             const int i = (k + int(step)) & 3;
             if (rTetra.n[i] == previousID)
@@ -268,7 +267,7 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
                                                this->mesh.getPoint(rTetra.v[pFace[2]]),
                                                quality.center) < 0.0)
             {
-                const int faceID = this->boundary.findSubFace(RTetraMesh::Face{currentID,i});
+                const int faceID = this->boundary.findSubFace(RTetraMesh::Face{currentID, i});
                 if (faceID >= 0)
                 {
                     encroachment.type = RBoundaryRecovery::EncroachmentFace;
@@ -295,9 +294,9 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
     {
         // The center may lie right on a subface of the tetrahedron it was found in.
         const RTetraMesh::Tetra &rSeed = this->mesh.getTetra(seedID);
-        for (int i=0;i<4;i++)
+        for (int i = 0; i < 4; i++)
         {
-            const int faceID = this->boundary.findSubFace(RTetraMesh::Face{seedID,i});
+            const int faceID = this->boundary.findSubFace(RTetraMesh::Face{seedID, i});
             if (faceID < 0)
             {
                 continue;
@@ -321,23 +320,23 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
         {
             return false;
         }
-        if (this->mesh.findDuplicateVertex(seedID,quality.center) >= 0)
+        if (this->mesh.findDuplicateVertex(seedID, quality.center) >= 0)
         {
             return false;
         }
-        if (!this->boundary.prepareVolumeCavity(quality.center,seedID))
+        if (!this->boundary.prepareVolumeCavity(quality.center, seedID))
         {
             return false;
         }
         encroachment = this->boundary.findEncroachment(quality.center);
         if (encroachment.type == RBoundaryRecovery::EncroachmentNone)
         {
-            if (!this->boundary.insertionAllowed(quality.center,RBoundaryRecovery::VertexVolume,minRadius))
+            if (!this->boundary.insertionAllowed(quality.center, RBoundaryRecovery::VertexVolume, minRadius))
             {
                 this->spacingRejections++;
                 return false;
             }
-            this->boundary.insertCavityPoint(quality.center,RBoundaryRecovery::VertexVolume,minRadius);
+            this->boundary.insertCavityPoint(quality.center, RBoundaryRecovery::VertexVolume, minRadius);
             return false;
         }
     }
@@ -347,12 +346,18 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
     // make new badly shaped tetrahedra, which could never end where parts of the boundary meet in a sharp angle.
     if (encroachment.type == RBoundaryRecovery::EncroachmentSegment)
     {
-        const bool split=this->boundary.splitSubSegment(encroachment.id,minRadius);
-        if (!split) this->boundaryRejections++;
+        const bool split = this->boundary.splitSubSegment(encroachment.id, minRadius);
+        if (!split)
+        {
+            this->boundaryRejections++;
+        }
         return split;
     }
-    const bool split=this->boundary.splitSubFace(encroachment.id,minRadius);
-    if (!split) this->boundaryRejections++;
+    const bool split = this->boundary.splitSubFace(encroachment.id, minRadius);
+    if (!split)
+    {
+        this->boundaryRejections++;
+    }
     return split;
 }
 
@@ -363,10 +368,10 @@ void RTetraMeshRefiner::refine()
     this->spacingRejections = this->boundaryRejections = 0;
     this->boundary.setCollectCreatedTetras(true);
     this->boundary.getCreatedTetras().clear();
-    RTetraMeshOptimizer optimizer(this->mesh,this->boundary,this->options);
+    RTetraMeshOptimizer optimizer(this->mesh, this->boundary, this->options);
 
     std::priority_queue<BadTetra> queue;
-    std::map<std::array<int,4>,int> pending;
+    std::map<std::array<int, 4>, int> pending;
 
     auto enqueue = [&](int tetraID, int nAttempts)
     {
@@ -375,15 +380,19 @@ void RTetraMeshRefiner::refine()
         {
             return;
         }
-        const auto &t=this->mesh.getTetra(tetraID);
-        auto key=std::array<int,4>{t.v[0],t.v[1],t.v[2],t.v[3]};std::sort(key.begin(),key.end());
-        auto queued=pending.find(key);
-        if (queued!=pending.end() && queued->second==tetraID) return;
-        pending[key]=tetraID;
+        const auto &t = this->mesh.getTetra(tetraID);
+        auto key = std::array<int, 4>{t.v[0], t.v[1], t.v[2], t.v[3]};
+        std::sort(key.begin(), key.end());
+        auto queued = pending.find(key);
+        if (queued != pending.end() && queued->second == tetraID)
+        {
+            return;
+        }
+        pending[key] = tetraID;
         BadTetra badTetra;
         badTetra.priority = quality.priority;
         badTetra.tetraID = tetraID;
-        for (int i=0;i<4;i++)
+        for (int i = 0; i < 4; i++)
         {
             badTetra.v[i] = this->mesh.getTetra(tetraID).v[i];
         }
@@ -391,21 +400,21 @@ void RTetraMeshRefiner::refine()
         queue.push(badTetra);
     };
 
-    for (int pass=0;pass<maxPasses && !this->stopped;pass++)
+    for (int pass = 0; pass < maxPasses && !this->stopped; pass++)
     {
-        progress.initialize(QString("Refining mesh: preparing pass %1 of %2").arg(pass+1).arg(maxPasses));
+        progress.initialize(QString("Refining mesh: preparing pass %1 of %2").arg(pass + 1).arg(maxPasses));
         // Regions are found again, as tetrahedra created at the boundary may have taken a wrong one.
         this->boundary.classifyRegions();
 
-        progress.initialize(QString("Refining mesh: finding bad cells, pass %1 of %2").arg(pass+1).arg(maxPasses),false);
+        progress.initialize(QString("Refining mesh: finding bad cells, pass %1 of %2").arg(pass + 1).arg(maxPasses), false);
         const int nSlots = this->mesh.getNTetraSlots();
-        for (int i=0;i<nSlots;i++)
+        for (int i = 0; i < nSlots; i++)
         {
             if (this->mesh.isAlive(i))
             {
-                enqueue(i,0);
+                enqueue(i, 0);
             }
-            progress.print(uint64_t(i)+1,uint64_t(nSlots));
+            progress.print(uint64_t(i) + 1, uint64_t(nSlots));
         }
         if (queue.empty())
         {
@@ -414,15 +423,19 @@ void RTetraMeshRefiner::refine()
 
         const uint64_t nVerticesBefore = this->boundary.getNSteinerVertices();
 
-        progress.initialize(QString("Refining mesh: pass %1 of %2").arg(pass+1).arg(maxPasses));
+        progress.initialize(QString("Refining mesh: pass %1 of %2").arg(pass + 1).arg(maxPasses));
         uint64_t processed = 0;
         while (!queue.empty())
         {
-            progress.pulse([&]() {
-                return QString("Refining mesh: pass %1 of %2, %3 cells processed, %4 queued, %5 nodes added")
-                    .arg(pass+1).arg(maxPasses).arg(processed).arg(qulonglong(queue.size()))
-                    .arg(qulonglong(this->boundary.getNSteinerVertices()));
-            });
+            progress.pulse([&]()
+                           {
+                               return QString("Refining mesh: pass %1 of %2, %3 cells processed, %4 queued, %5 nodes added")
+                                   .arg(pass + 1)
+                                   .arg(maxPasses)
+                                   .arg(processed)
+                                   .arg(qulonglong(queue.size()))
+                                   .arg(qulonglong(this->boundary.getNSteinerVertices()));
+                           });
             ++processed;
             if (this->boundary.getNSteinerVertices() >= this->maxSteinerVertices)
             {
@@ -432,9 +445,13 @@ void RTetraMeshRefiner::refine()
 
             const BadTetra badTetra = queue.top();
             queue.pop();
-            auto key=std::array<int,4>{badTetra.v[0],badTetra.v[1],badTetra.v[2],badTetra.v[3]};std::sort(key.begin(),key.end());
-            auto queued=pending.find(key);
-            if (queued==pending.end() || queued->second!=badTetra.tetraID) continue;
+            auto key = std::array<int, 4>{badTetra.v[0], badTetra.v[1], badTetra.v[2], badTetra.v[3]};
+            std::sort(key.begin(), key.end());
+            auto queued = pending.find(key);
+            if (queued == pending.end() || queued->second != badTetra.tetraID)
+            {
+                continue;
+            }
             pending.erase(queued);
 
             if (!this->mesh.isAlive(badTetra.tetraID))
@@ -452,7 +469,7 @@ void RTetraMeshRefiner::refine()
                 continue;
             }
 
-            const bool tryAgain = this->refineTetra(badTetra,quality);
+            const bool tryAgain = this->refineTetra(badTetra, quality);
 
             // Subsegments and subfaces removed by the new vertex are put back.
             this->boundary.recover();
@@ -463,7 +480,7 @@ void RTetraMeshRefiner::refine()
             {
                 if (this->mesh.isAlive(tetraID))
                 {
-                    enqueue(tetraID,0);
+                    enqueue(tetraID, 0);
                 }
             }
             rCreated.clear();
@@ -475,7 +492,11 @@ void RTetraMeshRefiner::refine()
                 {
                     BadTetra again = badTetra;
                     again.nAttempts++;
-                    if (!pending.count(key)) { pending[key]=again.tetraID;queue.push(again); }
+                    if (!pending.count(key))
+                    {
+                        pending[key] = again.tetraID;
+                        queue.push(again);
+                    }
                 }
             }
         }
@@ -491,6 +512,6 @@ void RTetraMeshRefiner::refine()
         }
     }
 
-    this->profile=optimizer.getProfile();
+    this->profile = optimizer.getProfile();
     this->boundary.setCollectCreatedTetras(false);
 }

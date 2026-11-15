@@ -5,9 +5,9 @@
 
 #include "rel_tetra_mesh_data.h"
 
-const int RTetraMeshData::triangleEdgeNodes[3][2] = {{0,1},{1,2},{2,0}};
+const int RTetraMeshData::triangleEdgeNodes[3][2] = {{0, 1}, {1, 2}, {2, 0}};
 
-const int RTetraMeshData::tetrahedronEdgeNodes[6][2] = {{0,1},{1,2},{2,0},{0,3},{1,3},{2,3}};
+const int RTetraMeshData::tetrahedronEdgeNodes[6][2] = {{0, 1}, {1, 2}, {2, 0}, {0, 3}, {1, 3}, {2, 3}};
 
 RTetraMeshData::RTetraMeshData()
 {
@@ -140,12 +140,12 @@ int RTetraMeshData::createMidEdgeNodes()
 
     // Node of each edge. Nodes are numbered in the order their edges are met,
     // which does not depend on the order of items in the table.
-    std::unordered_map<uint64_t,int> edgeNodes;
+    std::unordered_map<uint64_t, int> edgeNodes;
     edgeNodes.reserve(2 * this->tetrahedra.size() + 2 * this->triangles.size() + this->edges.size());
 
     auto findMidNode = [&](int node1, int node2) -> int
     {
-        const uint64_t key = (uint64_t(uint32_t(std::min(node1,node2))) << 32) | uint64_t(uint32_t(std::max(node1,node2)));
+        const uint64_t key = (uint64_t(uint32_t(std::min(node1, node2))) << 32) | uint64_t(uint32_t(std::max(node1, node2)));
         auto iter = edgeNodes.find(key);
         if (iter != edgeNodes.end())
         {
@@ -159,13 +159,13 @@ int RTetraMeshData::createMidEdgeNodes()
                                          a.z + 0.5 * (b.z - a.z),
                                          noMarker,
                                          a.size > 0.0 && b.size > 0.0 ? 0.5 * (a.size + b.size) : 0.0);
-        edgeNodes.emplace(key,nodeID);
+        edgeNodes.emplace(key, nodeID);
         return nodeID;
     };
 
     for (Tetrahedron &rTetrahedron : this->tetrahedra)
     {
-        for (int i=0;i<6;i++)
+        for (int i = 0; i < 6; i++)
         {
             rTetrahedron.midNodeIDs[i] = findMidNode(rTetrahedron.nodeIDs[tetrahedronEdgeNodes[i][0]],
                                                      rTetrahedron.nodeIDs[tetrahedronEdgeNodes[i][1]]);
@@ -173,7 +173,7 @@ int RTetraMeshData::createMidEdgeNodes()
     }
     for (Triangle &rTriangle : this->triangles)
     {
-        for (int i=0;i<3;i++)
+        for (int i = 0; i < 3; i++)
         {
             rTriangle.midNodeIDs[i] = findMidNode(rTriangle.nodeIDs[triangleEdgeNodes[i][0]],
                                                   rTriangle.nodeIDs[triangleEdgeNodes[i][1]]);
@@ -181,7 +181,7 @@ int RTetraMeshData::createMidEdgeNodes()
     }
     for (Edge &rEdge : this->edges)
     {
-        rEdge.midNodeID = findMidNode(rEdge.nodeIDs[0],rEdge.nodeIDs[1]);
+        rEdge.midNodeID = findMidNode(rEdge.nodeIDs[0], rEdge.nodeIDs[1]);
     }
 
     return int(this->nodes.size() - nCornerNodes);
@@ -190,7 +190,7 @@ int RTetraMeshData::createMidEdgeNodes()
 int RTetraMeshData::removeMidEdgeNodes()
 {
     // Nodes which are a mid-edge node of an element and a corner node of none.
-    std::vector<unsigned char> remove(this->nodes.size(),0);
+    std::vector<unsigned char> remove(this->nodes.size(), 0);
     bool found = false;
 
     auto mark = [&](int &rNodeID)
@@ -249,9 +249,9 @@ int RTetraMeshData::removeMidEdgeNodes()
     }
 
     // Nodes which stay keep their order.
-    std::vector<int> nodeMap(this->nodes.size(),noNode);
+    std::vector<int> nodeMap(this->nodes.size(), noNode);
     size_t nKept = 0;
-    for (size_t i=0;i<this->nodes.size();i++)
+    for (size_t i = 0; i < this->nodes.size(); i++)
     {
         if (!remove[i])
         {
@@ -298,9 +298,7 @@ double RTetraMeshData::findTetrahedronVolume(int tetrahedronID) const
     const double acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
     const double adx = d.x - a.x, ady = d.y - a.y, adz = d.z - a.z;
 
-    return (  (aby * acz - abz * acy) * adx
-            + (abz * acx - abx * acz) * ady
-            + (abx * acy - aby * acx) * adz) / 6.0;
+    return ((aby * acz - abz * acy) * adx + (abz * acx - abx * acz) * ady + (abx * acy - aby * acx) * adz) / 6.0;
 }
 
 double RTetraMeshData::findTriangleArea(int triangleID) const

@@ -61,8 +61,8 @@ namespace
     {
         x = a * b;
         double aHigh, aLow, bHigh, bLow;
-        split(a,aHigh,aLow);
-        split(b,bHigh,bLow);
+        split(a, aHigh, aLow);
+        split(b, bHigh, bLow);
         const double error1 = x - (aHigh * bHigh);
         const double error2 = error1 - (aLow * bHigh);
         const double error3 = error2 - (aHigh * bLow);
@@ -73,10 +73,10 @@ namespace
     Expansion difference(double a, double b)
     {
         double x, y;
-        twoDiff(a,b,x,y);
+        twoDiff(a, b, x, y);
         if (y != 0.0)
         {
-            return Expansion{y,x};
+            return Expansion{y, x};
         }
         return Expansion{x};
     }
@@ -112,7 +112,7 @@ namespace
         if (eIndex < e.size() || fIndex < f.size())
         {
             const double next = takeE() ? e[eIndex++] : f[fIndex++];
-            fastTwoSum(next,q,qNew,hh);
+            fastTwoSum(next, q, qNew, hh);
             q = qNew;
             if (hh != 0.0)
             {
@@ -121,7 +121,7 @@ namespace
             while (eIndex < e.size() || fIndex < f.size())
             {
                 const double now = takeE() ? e[eIndex++] : f[fIndex++];
-                twoSum(q,now,qNew,hh);
+                twoSum(q, now, qNew, hh);
                 q = qNew;
                 if (hh != 0.0)
                 {
@@ -144,20 +144,20 @@ namespace
 
         double q, hh, product1, product0, s;
 
-        twoProduct(e[0],b,q,hh);
+        twoProduct(e[0], b, q, hh);
         if (hh != 0.0)
         {
             h.push_back(hh);
         }
-        for (size_t i=1;i<e.size();i++)
+        for (size_t i = 1; i < e.size(); i++)
         {
-            twoProduct(e[i],b,product1,product0);
-            twoSum(q,product0,s,hh);
+            twoProduct(e[i], b, product1, product0);
+            twoSum(q, product0, s, hh);
             if (hh != 0.0)
             {
                 h.push_back(hh);
             }
-            fastTwoSum(product1,s,q,hh);
+            fastTwoSum(product1, s, q, hh);
             if (hh != 0.0)
             {
                 h.push_back(hh);
@@ -176,10 +176,10 @@ namespace
         const Expansion &rLong = e.size() >= f.size() ? e : f;
         const Expansion &rShort = e.size() >= f.size() ? f : e;
 
-        Expansion h = scale(rLong,rShort[0]);
-        for (size_t i=1;i<rShort.size();i++)
+        Expansion h = scale(rLong, rShort[0]);
+        for (size_t i = 1; i < rShort.size(); i++)
         {
-            h = sum(h,scale(rLong,rShort[i]));
+            h = sum(h, scale(rLong, rShort[i]));
         }
         return h;
     }
@@ -196,69 +196,69 @@ namespace
 
     inline Expansion subtract(const Expansion &e, const Expansion &f)
     {
-        return sum(e,negative(f));
+        return sum(e, negative(f));
     }
 
     //! Exact value of a*d - b*c.
     inline Expansion cross(const Expansion &a, const Expansion &b, const Expansion &c, const Expansion &d)
     {
-        return subtract(product(a,d),product(b,c));
+        return subtract(product(a, d), product(b, c));
     }
 
     //! Exact determinant of rows (a-d), (b-d) and (c-d).
     double orient3dExact(const double *pa, const double *pb, const double *pc, const double *pd)
     {
-        const Expansion adx = difference(pa[0],pd[0]);
-        const Expansion ady = difference(pa[1],pd[1]);
-        const Expansion adz = difference(pa[2],pd[2]);
-        const Expansion bdx = difference(pb[0],pd[0]);
-        const Expansion bdy = difference(pb[1],pd[1]);
-        const Expansion bdz = difference(pb[2],pd[2]);
-        const Expansion cdx = difference(pc[0],pd[0]);
-        const Expansion cdy = difference(pc[1],pd[1]);
-        const Expansion cdz = difference(pc[2],pd[2]);
+        const Expansion adx = difference(pa[0], pd[0]);
+        const Expansion ady = difference(pa[1], pd[1]);
+        const Expansion adz = difference(pa[2], pd[2]);
+        const Expansion bdx = difference(pb[0], pd[0]);
+        const Expansion bdy = difference(pb[1], pd[1]);
+        const Expansion bdz = difference(pb[2], pd[2]);
+        const Expansion cdx = difference(pc[0], pd[0]);
+        const Expansion cdy = difference(pc[1], pd[1]);
+        const Expansion cdz = difference(pc[2], pd[2]);
 
-        const Expansion det = sum(sum(product(adz,cross(bdx,bdy,cdx,cdy)),
-                                      product(bdz,cross(cdx,cdy,adx,ady))),
-                                  product(cdz,cross(adx,ady,bdx,bdy)));
+        const Expansion det = sum(sum(product(adz, cross(bdx, bdy, cdx, cdy)),
+                                      product(bdz, cross(cdx, cdy, adx, ady))),
+                                  product(cdz, cross(adx, ady, bdx, bdy)));
         return det.back();
     }
 
     //! Exact determinant of rows (a-e, |a-e|^2), (b-e, |b-e|^2), (c-e, |c-e|^2) and (d-e, |d-e|^2).
     double inSphereExact(const double *pa, const double *pb, const double *pc, const double *pd, const double *pe)
     {
-        const Expansion aex = difference(pa[0],pe[0]);
-        const Expansion aey = difference(pa[1],pe[1]);
-        const Expansion aez = difference(pa[2],pe[2]);
-        const Expansion bex = difference(pb[0],pe[0]);
-        const Expansion bey = difference(pb[1],pe[1]);
-        const Expansion bez = difference(pb[2],pe[2]);
-        const Expansion cex = difference(pc[0],pe[0]);
-        const Expansion cey = difference(pc[1],pe[1]);
-        const Expansion cez = difference(pc[2],pe[2]);
-        const Expansion dex = difference(pd[0],pe[0]);
-        const Expansion dey = difference(pd[1],pe[1]);
-        const Expansion dez = difference(pd[2],pe[2]);
+        const Expansion aex = difference(pa[0], pe[0]);
+        const Expansion aey = difference(pa[1], pe[1]);
+        const Expansion aez = difference(pa[2], pe[2]);
+        const Expansion bex = difference(pb[0], pe[0]);
+        const Expansion bey = difference(pb[1], pe[1]);
+        const Expansion bez = difference(pb[2], pe[2]);
+        const Expansion cex = difference(pc[0], pe[0]);
+        const Expansion cey = difference(pc[1], pe[1]);
+        const Expansion cez = difference(pc[2], pe[2]);
+        const Expansion dex = difference(pd[0], pe[0]);
+        const Expansion dey = difference(pd[1], pe[1]);
+        const Expansion dez = difference(pd[2], pe[2]);
 
-        const Expansion ab = cross(aex,aey,bex,bey);
-        const Expansion bc = cross(bex,bey,cex,cey);
-        const Expansion cd = cross(cex,cey,dex,dey);
-        const Expansion da = cross(dex,dey,aex,aey);
-        const Expansion ac = cross(aex,aey,cex,cey);
-        const Expansion bd = cross(bex,bey,dex,dey);
+        const Expansion ab = cross(aex, aey, bex, bey);
+        const Expansion bc = cross(bex, bey, cex, cey);
+        const Expansion cd = cross(cex, cey, dex, dey);
+        const Expansion da = cross(dex, dey, aex, aey);
+        const Expansion ac = cross(aex, aey, cex, cey);
+        const Expansion bd = cross(bex, bey, dex, dey);
 
-        const Expansion abc = sum(subtract(product(aez,bc),product(bez,ac)),product(cez,ab));
-        const Expansion bcd = sum(subtract(product(bez,cd),product(cez,bd)),product(dez,bc));
-        const Expansion cda = sum(sum(product(cez,da),product(dez,ac)),product(aez,cd));
-        const Expansion dab = sum(sum(product(dez,ab),product(aez,bd)),product(bez,da));
+        const Expansion abc = sum(subtract(product(aez, bc), product(bez, ac)), product(cez, ab));
+        const Expansion bcd = sum(subtract(product(bez, cd), product(cez, bd)), product(dez, bc));
+        const Expansion cda = sum(sum(product(cez, da), product(dez, ac)), product(aez, cd));
+        const Expansion dab = sum(sum(product(dez, ab), product(aez, bd)), product(bez, da));
 
-        const Expansion aLift = sum(sum(product(aex,aex),product(aey,aey)),product(aez,aez));
-        const Expansion bLift = sum(sum(product(bex,bex),product(bey,bey)),product(bez,bez));
-        const Expansion cLift = sum(sum(product(cex,cex),product(cey,cey)),product(cez,cez));
-        const Expansion dLift = sum(sum(product(dex,dex),product(dey,dey)),product(dez,dez));
+        const Expansion aLift = sum(sum(product(aex, aex), product(aey, aey)), product(aez, aez));
+        const Expansion bLift = sum(sum(product(bex, bex), product(bey, bey)), product(bez, bez));
+        const Expansion cLift = sum(sum(product(cex, cex), product(cey, cey)), product(cez, cez));
+        const Expansion dLift = sum(sum(product(dex, dex), product(dey, dey)), product(dez, dez));
 
-        const Expansion det = sum(subtract(product(dLift,abc),product(cLift,dab)),
-                                  subtract(product(bLift,cda),product(aLift,bcd)));
+        const Expansion det = sum(subtract(product(dLift, abc), product(cLift, dab)),
+                                  subtract(product(bLift, cda), product(aLift, bcd)));
         return det.back();
     }
 
@@ -285,13 +285,9 @@ double RGeometricPredicates::orient3d(const double *pa, const double *pb, const 
     const double adxbdy = adx * bdy;
     const double bdxady = bdx * ady;
 
-    const double det = adz * (bdxcdy - cdxbdy)
-                     + bdz * (cdxady - adxcdy)
-                     + cdz * (adxbdy - bdxady);
+    const double det = adz * (bdxcdy - cdxbdy) + bdz * (cdxady - adxcdy) + cdz * (adxbdy - bdxady);
 
-    const double permanent = (std::fabs(bdxcdy) + std::fabs(cdxbdy)) * std::fabs(adz)
-                           + (std::fabs(cdxady) + std::fabs(adxcdy)) * std::fabs(bdz)
-                           + (std::fabs(adxbdy) + std::fabs(bdxady)) * std::fabs(cdz);
+    const double permanent = (std::fabs(bdxcdy) + std::fabs(cdxbdy)) * std::fabs(adz) + (std::fabs(cdxady) + std::fabs(adxcdy)) * std::fabs(bdz) + (std::fabs(adxbdy) + std::fabs(bdxady)) * std::fabs(cdz);
     const double errorBound = orient3dErrorBound * permanent;
 
     // Determinant of rows (a-d), (b-d) and (c-d) has opposite sign than ((b-a)x(c-a)).(d-a).
@@ -299,7 +295,7 @@ double RGeometricPredicates::orient3d(const double *pa, const double *pb, const 
     {
         return -det;
     }
-    return -orient3dExact(pa,pb,pc,pd);
+    return -orient3dExact(pa, pb, pc, pd);
 }
 
 double RGeometricPredicates::inSphere(const double *pa, const double *pb, const double *pc, const double *pd, const double *pe)
@@ -366,18 +362,7 @@ double RGeometricPredicates::inSphere(const double *pa, const double *pb, const 
     const double bexdeyAbs = std::fabs(bexdey);
     const double dexbeyAbs = std::fabs(dexbey);
 
-    const double permanent = ((cexdeyAbs + dexceyAbs) * bezAbs
-                            + (dexbeyAbs + bexdeyAbs) * cezAbs
-                            + (bexceyAbs + cexbeyAbs) * dezAbs) * aLift
-                           + ((dexaeyAbs + aexdeyAbs) * cezAbs
-                            + (aexceyAbs + cexaeyAbs) * dezAbs
-                            + (cexdeyAbs + dexceyAbs) * aezAbs) * bLift
-                           + ((aexbeyAbs + bexaeyAbs) * dezAbs
-                            + (bexdeyAbs + dexbeyAbs) * aezAbs
-                            + (dexaeyAbs + aexdeyAbs) * bezAbs) * cLift
-                           + ((bexceyAbs + cexbeyAbs) * aezAbs
-                            + (cexaeyAbs + aexceyAbs) * bezAbs
-                            + (aexbeyAbs + bexaeyAbs) * cezAbs) * dLift;
+    const double permanent = ((cexdeyAbs + dexceyAbs) * bezAbs + (dexbeyAbs + bexdeyAbs) * cezAbs + (bexceyAbs + cexbeyAbs) * dezAbs) * aLift + ((dexaeyAbs + aexdeyAbs) * cezAbs + (aexceyAbs + cexaeyAbs) * dezAbs + (cexdeyAbs + dexceyAbs) * aezAbs) * bLift + ((aexbeyAbs + bexaeyAbs) * dezAbs + (bexdeyAbs + dexbeyAbs) * aezAbs + (dexaeyAbs + aexdeyAbs) * bezAbs) * cLift + ((bexceyAbs + cexbeyAbs) * aezAbs + (cexaeyAbs + aexceyAbs) * bezAbs + (aexbeyAbs + bexaeyAbs) * cezAbs) * dLift;
     const double errorBound = inSphereErrorBound * permanent;
 
     // The determinant is positive inside of the sphere for points oriented the other way round.
@@ -385,5 +370,5 @@ double RGeometricPredicates::inSphere(const double *pa, const double *pb, const 
     {
         return -det;
     }
-    return -inSphereExact(pa,pb,pc,pd,pe);
+    return -inSphereExact(pa, pb, pc, pd, pe);
 }

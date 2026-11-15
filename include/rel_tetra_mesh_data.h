@@ -50,7 +50,7 @@ class RTetraMeshData
 
         struct Edge
         {
-            int nodeIDs[2] = {0,0};
+            int nodeIDs[2] = {0, 0};
             //! Node in the middle of the edge, noNode in a linear mesh.
             int midNodeID = noNode;
             //! Marker of a group of lines the edge belongs to.
@@ -59,9 +59,9 @@ class RTetraMeshData
 
         struct Triangle
         {
-            int nodeIDs[3] = {0,0,0};
+            int nodeIDs[3] = {0, 0, 0};
             //! Nodes in the middle of edges (see triangleEdgeNodes), noNode in a linear mesh.
-            int midNodeIDs[3] = {noNode,noNode,noNode};
+            int midNodeIDs[3] = {noNode, noNode, noNode};
             //! Marker of a group of surfaces the triangle belongs to.
             int marker = noMarker;
         };
@@ -70,13 +70,13 @@ class RTetraMeshData
         {
             //! Nodes are ordered so, that the fourth one lies on the side of the first three,
             //! which their normal (n2-n1)x(n3-n1) points to.
-            int nodeIDs[4] = {0,0,0,0};
+            int nodeIDs[4] = {0, 0, 0, 0};
             //! Nodes in the middle of edges (see tetrahedronEdgeNodes), noNode in a linear mesh.
-            int midNodeIDs[6] = {noNode,noNode,noNode,noNode,noNode,noNode};
+            int midNodeIDs[6] = {noNode, noNode, noNode, noNode, noNode, noNode};
             //! Marker of a group of volumes (region) the tetrahedron belongs to.
             int marker = noMarker;
             //! Tetrahedra sharing a face opposite to each node.
-            int neighborIDs[4] = {noTetrahedron,noTetrahedron,noTetrahedron,noTetrahedron};
+            int neighborIDs[4] = {noTetrahedron, noTetrahedron, noTetrahedron, noTetrahedron};
         };
 
     protected:
@@ -149,7 +149,6 @@ class RTetraMeshData
 
         //! Return area of a triangle.
         double findTriangleArea(int triangleID) const;
-
 };
 
 #endif // REL_TETRA_MESH_DATA_H

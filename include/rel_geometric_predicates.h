@@ -11,7 +11,9 @@ class RGeometricPredicates
     private:
 
         //! Constructor.
-        RGeometricPredicates() {}
+        RGeometricPredicates()
+        {
+        }
 
     public:
 
@@ -26,7 +28,6 @@ class RGeometricPredicates
         //! Return positive value if point e lies inside of the sphere, negative value if it lies
         //! outside and zero if all five points are cospherical.
         static double inSphere(const double *pa, const double *pb, const double *pc, const double *pd, const double *pe);
-
 };
 
 #endif // REL_GEOMETRIC_PREDICATES_H
