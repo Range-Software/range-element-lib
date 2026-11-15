@@ -19,7 +19,7 @@ The library does not know `RModel`. It works with a plain description of a mesh 
 |---|---|
 | `RTetraMesher` | Entry point, `generate(input, options, output)` |
 | `RTetraMeshData` | Input and output: nodes, edges, triangles, tetrahedra and their markers |
-| `RTetraMeshOptions` | Options: quality mesh, radius/edge ratio, minimum dihedral angle, maximum volume, size function, tolerance, limit of added nodes |
+| `RTetraMeshOptions` | Options: quality mesh, radius/edge ratio, minimum dihedral angle, maximum volume, size function, tolerance, limit of added nodes, order of elements |
 | `RGeometricPredicates` | Exact `orient3d()` and `inSphere()` tests |
 | `RTetraMesh` | Tetrahedralization which points can be inserted to: point location, cavity search, cavity filling |
 | `RDelaunayTetrahedralizer` | Delaunay tetrahedralization of a set of points |
@@ -41,6 +41,17 @@ The surface has to be **conforming**: triangles may touch only in whole edges or
 - Triangles of all surfaces and interfaces. Triangles lying in one plane and having the same marker form a facet, which triangulation is free to change.
 - Edges with a marker, split where nodes were added on them.
 - Tetrahedra with a marker of their volume and with their neighbors. Node order gives a positive volume.
+
+### Quadratic elements
+
+`RTetraMeshOptions::setElementOrder(2)` generates quadratic (second order) elements: 10-node tetrahedra, 6-node triangles and 3-node edges. The mesh is generated as a linear one and a node is then added to the middle of each edge, one for all elements sharing the edge.
+
+- Mid-edge nodes are the last nodes of the output, after input nodes and nodes added by the generator. Corner nodes, elements and neighbors are the same as those of a linear mesh generated with the same options.
+- Elements refer to them by `midNodeIDs` (`midNodeID` of an edge), which are `RTetraMeshData::noNode` in a linear mesh. Their order is given by `RTetraMeshData::tetrahedronEdgeNodes` (edges 0-1, 1-2, 2-0, 0-3, 1-3, 2-3) and `RTetraMeshData::triangleEdgeNodes` (edges 0-1, 1-2, 2-0).
+- Edges are straight. A mid-edge node on a curved surface lies on its triangle, not on the surface the triangles approximate.
+- Mesh size at a mid-edge node is the mean of sizes at both ends of its edge. It has no marker of a point.
+
+`RTetraMeshData::createMidEdgeNodes()` and `removeMidEdgeNodes()` do the same conversion on any mesh. Mid-edge nodes of an input are not read: its nodes are all taken as corner nodes, so a quadratic mesh has to be made linear before it is reconstructed.
 
 ## Robustness
 

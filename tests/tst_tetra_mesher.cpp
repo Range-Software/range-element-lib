@@ -387,6 +387,76 @@ class TestTetraMesher : public QObject
             return true;
         }
 
+        //! Verify mid-edge nodes of a quadratic mesh which has given number of corner nodes.
+        static void verifySecondOrder(const RTetraMeshData &output, size_t nCornerNodes)
+        {
+            QCOMPARE(output.getElementOrder(),2);
+            const std::vector<RTetraMeshData::Node> &rNodes = output.getNodes();
+            QVERIFY(rNodes.size() > nCornerNodes);
+
+            // Node of each edge.
+            std::map<std::array<int,2>,int> edgeNodes;
+            std::vector<int> nUses(rNodes.size(),0);
+            bool valid = true;
+            auto verifyEdge = [&](int node1, int node2, int midNode)
+            {
+                // Corner nodes are those of a linear mesh, mid-edge nodes follow them.
+                valid = valid && node1 >= 0 && size_t(node1) < nCornerNodes && node2 >= 0 && size_t(node2) < nCornerNodes;
+                valid = valid && size_t(midNode) >= nCornerNodes && size_t(midNode) < rNodes.size();
+                if (!valid)
+                {
+                    return;
+                }
+                const RTetraMeshData::Node &a = rNodes[size_t(node1)];
+                const RTetraMeshData::Node &b = rNodes[size_t(node2)];
+                const RTetraMeshData::Node &m = rNodes[size_t(midNode)];
+                const double length = std::hypot(b.x-a.x,b.y-a.y,b.z-a.z);
+                valid = valid && std::hypot(m.x-0.5*(a.x+b.x),m.y-0.5*(a.y+b.y),m.z-0.5*(a.z+b.z)) <= 1.0e-14 * length;
+                valid = valid && m.marker == RTetraMeshData::noMarker;
+                // All elements at an edge share its node.
+                const std::array<int,2> key = {std::min(node1,node2),std::max(node1,node2)};
+                auto entry = edgeNodes.emplace(key,midNode);
+                valid = valid && entry.first->second == midNode;
+                if (entry.second)
+                {
+                    nUses[size_t(midNode)]++;
+                }
+            };
+
+            for (const RTetraMeshData::Tetrahedron &rTetrahedron : output.getTetrahedra())
+            {
+                for (int i=0;i<6;i++)
+                {
+                    verifyEdge(rTetrahedron.nodeIDs[RTetraMeshData::tetrahedronEdgeNodes[i][0]],
+                               rTetrahedron.nodeIDs[RTetraMeshData::tetrahedronEdgeNodes[i][1]],
+                               rTetrahedron.midNodeIDs[i]);
+                }
+            }
+            const size_t nTetrahedraEdges = edgeNodes.size();
+            for (const RTetraMeshData::Triangle &rTriangle : output.getTriangles())
+            {
+                for (int i=0;i<3;i++)
+                {
+                    verifyEdge(rTriangle.nodeIDs[RTetraMeshData::triangleEdgeNodes[i][0]],
+                               rTriangle.nodeIDs[RTetraMeshData::triangleEdgeNodes[i][1]],
+                               rTriangle.midNodeIDs[i]);
+                }
+            }
+            for (const RTetraMeshData::Edge &rEdge : output.getEdges())
+            {
+                verifyEdge(rEdge.nodeIDs[0],rEdge.nodeIDs[1],rEdge.midNodeID);
+            }
+            QVERIFY(valid);
+            // Triangles and edges of a generated mesh lie on edges of tetrahedra.
+            QCOMPARE(edgeNodes.size(),nTetrahedraEdges);
+            // There is one node for each edge and no other one.
+            QCOMPARE(rNodes.size(),nCornerNodes + edgeNodes.size());
+            for (size_t i=nCornerNodes;i<rNodes.size();i++)
+            {
+                QCOMPARE(nUses[i],1);
+            }
+        }
+
         static RTetraMeshOptions createOptions(bool qualityMesh)
         {
             RTetraMeshOptions options;
@@ -414,6 +484,9 @@ private slots:
     void quadrilateralFaces();
     void reconstruct();
     void duplicateNodes();
+    void secondOrder();
+    void secondOrderQuality();
+    void midEdgeNodes();
     void invalidInput();
 };
 
@@ -1000,9 +1073,163 @@ void TestTetraMesher::duplicateNodes()
     QCOMPARE(int(volumes.size()),2);
 }
 
+void TestTetraMesher::secondOrder()
+{
+    RTetraMeshData input, linear, output;
+    addBox(input,0.0,0.0,0.0,1.0,1.0,1.0,3);
+
+    RTetraMeshOptions options = createOptions(false);
+    QCOMPARE(options.getElementOrder(),1);
+    QVERIFY(generate(input,options,linear));
+    QCOMPARE(linear.getElementOrder(),1);
+    for (const RTetraMeshData::Tetrahedron &rTetrahedron : linear.getTetrahedra())
+    {
+        for (int nodeID : rTetrahedron.midNodeIDs)
+        {
+            QCOMPARE(nodeID,RTetraMeshData::noNode);
+        }
+    }
+
+    options.setElementOrder(2);
+    QVERIFY(generate(input,options,output));
+
+    verifyMesh(input,output);
+    verifySecondOrder(output,linear.getNodes().size());
+    QVERIFY(std::fabs(findTotalVolume(output) - 1.0) < 1.0e-12);
+    QVERIFY(std::fabs(findTotalArea(output) - 6.0) < 1.0e-12);
+
+    // Corner nodes and elements are those of the linear mesh.
+    QCOMPARE(output.getTetrahedra().size(),linear.getTetrahedra().size());
+    QCOMPARE(output.getTriangles().size(),linear.getTriangles().size());
+    for (size_t i=0;i<linear.getTetrahedra().size();i++)
+    {
+        for (int j=0;j<4;j++)
+        {
+            QCOMPARE(output.getTetrahedra()[i].nodeIDs[j],linear.getTetrahedra()[i].nodeIDs[j]);
+            QCOMPARE(output.getTetrahedra()[i].neighborIDs[j],linear.getTetrahedra()[i].neighborIDs[j]);
+        }
+    }
+    // Number of edges follows from the Euler characteristic of a ball: nodes - edges + faces - cells = 1.
+    const size_t nFaces = (4 * linear.getTetrahedra().size() + linear.getTriangles().size()) / 2;
+    QCOMPARE(output.getNodes().size() - linear.getNodes().size(),
+             linear.getNodes().size() + nFaces - linear.getTetrahedra().size() - 1);
+}
+
+void TestTetraMesher::secondOrderQuality()
+{
+    RTetraMeshData input, linear, output;
+    addBox(input,0.0,0.0,0.0,1.0,1.0,1.0,0);
+    // Two volumes, a line on an edge of the box and a line inside.
+    addBox(input,0.25,0.25,0.25,0.75,0.75,0.75,1);
+    input.addEdge(0,1,2);
+    const int n1 = input.addNode(0.1,0.1,0.9);
+    const int n2 = input.addNode(0.9,0.1,0.9);
+    input.addEdge(n1,n2,5);
+    for (RTetraMeshData::Node &rNode : input.getNodes())
+    {
+        rNode.size = 0.2;
+    }
+
+    RTetraMeshOptions options = createOptions(true);
+    options.setUseSizeFunction(true);
+    QVERIFY(generate(input,options,linear));
+    options.setElementOrder(2);
+    QVERIFY(generate(input,options,output));
+
+    verifyMesh(input,output);
+    verifySecondOrder(output,linear.getNodes().size());
+    QVERIFY(std::fabs(findTotalVolume(output) - 1.0) < 1.0e-10);
+    QVERIFY(!output.getEdges().empty());
+    QCOMPARE(output.getTetrahedra().size(),linear.getTetrahedra().size());
+    QCOMPARE(output.getEdges().size(),linear.getEdges().size());
+
+    // Mesh size is interpolated to mid-edge nodes.
+    for (const RTetraMeshData::Edge &rEdge : output.getEdges())
+    {
+        const double size1 = output.getNodes()[size_t(rEdge.nodeIDs[0])].size;
+        const double size2 = output.getNodes()[size_t(rEdge.nodeIDs[1])].size;
+        QVERIFY(size1 > 0.0 && size2 > 0.0);
+        QVERIFY(std::fabs(output.getNodes()[size_t(rEdge.midNodeID)].size - 0.5 * (size1 + size2)) < 1.0e-14);
+    }
+}
+
+void TestTetraMesher::midEdgeNodes()
+{
+    // Two tetrahedra sharing a face, a triangle on it and an edge.
+    RTetraMeshData data;
+    data.addNode(0.0,0.0,0.0,RTetraMeshData::noMarker,1.0);
+    data.addNode(1.0,0.0,0.0,RTetraMeshData::noMarker,3.0);
+    data.addNode(0.0,1.0,0.0);
+    data.addNode(0.0,0.0,1.0);
+    data.addNode(0.0,0.0,-1.0);
+    data.addTetrahedron(0,1,2,3,0);
+    data.addTetrahedron(0,2,1,4,1);
+    data.addTriangle(0,1,2,7);
+    data.addEdge(1,0,9);
+    const RTetraMeshData linear = data;
+
+    QCOMPARE(data.getElementOrder(),1);
+    QCOMPARE(data.removeMidEdgeNodes(),0);
+
+    // Three edges of the shared face and three more of each tetrahedron.
+    QCOMPARE(data.createMidEdgeNodes(),9);
+    QCOMPARE(data.getElementOrder(),2);
+    QCOMPARE(data.getNodes().size(),size_t(14));
+    verifySecondOrder(data,5);
+
+    // The first mid-edge node lies between the first two nodes of the first tetrahedron.
+    const RTetraMeshData::Tetrahedron &rFirst = data.getTetrahedra()[0];
+    QCOMPARE(rFirst.midNodeIDs[0],5);
+    QCOMPARE(data.getNodes()[5].x,0.5);
+    QCOMPARE(data.getNodes()[5].y,0.0);
+    QCOMPARE(data.getNodes()[5].z,0.0);
+    QCOMPARE(data.getNodes()[5].size,2.0);
+    // Mesh size is not set where it is not prescribed at both ends.
+    QCOMPARE(data.getNodes()[size_t(rFirst.midNodeIDs[1])].size,0.0);
+    // The edge, the triangle and both tetrahedra share the node, whichever way they go along the edge.
+    QCOMPARE(data.getEdges()[0].midNodeID,5);
+    QCOMPARE(data.getTriangles()[0].midNodeIDs[0],5);
+    QCOMPARE(data.getTetrahedra()[1].midNodeIDs[2],5);
+    // Order of edges of a tetrahedron: 0-1, 1-2, 2-0, 0-3, 1-3, 2-3.
+    const RTetraMeshData::Node &rMid = data.getNodes()[size_t(rFirst.midNodeIDs[5])];
+    QCOMPARE(rMid.x,0.0);
+    QCOMPARE(rMid.y,0.5);
+    QCOMPARE(rMid.z,0.5);
+
+    // Nodes are not added twice.
+    QCOMPARE(data.createMidEdgeNodes(),9);
+    QCOMPARE(data.getNodes().size(),size_t(14));
+
+    QCOMPARE(data.removeMidEdgeNodes(),9);
+    QCOMPARE(data.getElementOrder(),1);
+    QCOMPARE(data.getNodes().size(),linear.getNodes().size());
+    for (size_t i=0;i<linear.getTetrahedra().size();i++)
+    {
+        for (int j=0;j<4;j++)
+        {
+            QCOMPARE(data.getTetrahedra()[i].nodeIDs[j],linear.getTetrahedra()[i].nodeIDs[j]);
+        }
+        for (int nodeID : data.getTetrahedra()[i].midNodeIDs)
+        {
+            QCOMPARE(nodeID,RTetraMeshData::noNode);
+        }
+    }
+}
+
 void TestTetraMesher::invalidInput()
 {
     RTetraMeshData output;
+
+    // Order of elements which is not supported.
+    {
+        RTetraMeshData input;
+        addBox(input,0.0,0.0,0.0,1.0,1.0,1.0,0);
+        RTetraMeshOptions options = createOptions(false);
+        options.setElementOrder(3);
+        QVERIFY_THROWS_EXCEPTION(RError,RTetraMesher::generate(input,options,output));
+        options.setElementOrder(0);
+        QVERIFY_THROWS_EXCEPTION(RError,RTetraMesher::generate(input,options,output));
+    }
 
     // No triangles.
     {

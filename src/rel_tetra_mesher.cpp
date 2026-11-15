@@ -187,6 +187,11 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     validateInput(input,reconstruct);
 
+    if (options.getElementOrder() != 1 && options.getElementOrder() != 2)
+    {
+        throw RError(RError::Type::InvalidInput,R_ERROR_REF,"Order of generated elements must be 1 or 2 (%d).",options.getElementOrder());
+    }
+
     if (input.getTriangles().empty() && !reconstruct)
     {
         throw RError(RError::Type::InvalidInput,R_ERROR_REF,"There are no triangles to generate tetrahedra from.");
@@ -468,6 +473,15 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         }
     }
 
+    // Quadratic elements. Nodes are added after everything else was done on a linear mesh,
+    // which they do not change: the nodes lie in the middle of straight edges.
+    int nMidEdgeNodes = 0;
+    if (options.getElementOrder() == 2)
+    {
+        progress.initialize("Creating mid-edge nodes");
+        nMidEdgeNodes = output.createMidEdgeNodes();
+    }
+
     profile.addWork(optimizer.getProfile());
     progress.initialize("Checking mesh quality");
     RTetraMeshQuality::Summary quality;
@@ -511,5 +525,9 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexSegment)),
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexFacet)),
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexVolume)));
+        if (options.getElementOrder() == 2)
+        {
+            RLogger::info("Elements are quadratic, %d nodes were added in the middle of edges.\n",nMidEdgeNodes);
+        }
     }
 }

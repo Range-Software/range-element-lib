@@ -28,6 +28,8 @@ class RTetraMeshOptions
         double tolerance;
         //! Maximum number of nodes the generator may add, zero if it is not limited.
         unsigned int maxSteinerNodes;
+        //! Order of generated elements: 1 for linear, 2 for quadratic with a node in the middle of each edge.
+        int elementOrder;
         std::string qualityReportPath;
 
     public:
@@ -88,6 +90,12 @@ class RTetraMeshOptions
 
         //! Set maximum number of added nodes.
         void setMaxSteinerNodes(unsigned int maxSteinerNodes);
+
+        //! Return order of generated elements.
+        int getElementOrder() const;
+
+        //! Set order of generated elements, 1 (linear) or 2 (quadratic).
+        void setElementOrder(int elementOrder);
 
         //! Optional JSON diagnostic export. Empty means no file is written.
         const std::string &getQualityReportPath() const { return qualityReportPath; }

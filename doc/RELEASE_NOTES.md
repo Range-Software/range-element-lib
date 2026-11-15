@@ -21,6 +21,8 @@ triangulated surface.
 
 ### Features
 
+- Quadratic (second order) elements can be generated: 10-node tetrahedra, 6-node
+  triangles and 3-node edges with a shared node in the middle of each straight edge
 - Volumes separated by interfaces and volumes nested in each other are meshed as
   separate regions
 - Points and lines are kept, lines are split where nodes are added on them

@@ -10,6 +10,7 @@ RTetraMeshOptions::RTetraMeshOptions()
     , useSizeFunction(false)
     , tolerance(1.0e-8)
     , maxSteinerNodes(0)
+    , elementOrder(1)
 {
 }
 
@@ -101,4 +102,14 @@ unsigned int RTetraMeshOptions::getMaxSteinerNodes() const
 void RTetraMeshOptions::setMaxSteinerNodes(unsigned int maxSteinerNodes)
 {
     this->maxSteinerNodes = maxSteinerNodes;
+}
+
+int RTetraMeshOptions::getElementOrder() const
+{
+    return this->elementOrder;
+}
+
+void RTetraMeshOptions::setElementOrder(int elementOrder)
+{
+    this->elementOrder = elementOrder;
 }
