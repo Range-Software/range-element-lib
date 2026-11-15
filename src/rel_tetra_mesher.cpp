@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <set>
 #include <vector>
 
 #include <rbl_error.h>
@@ -18,6 +19,7 @@
 #include "rel_tetra_mesher.h"
 #include "rel_tetra_mesh_optimizer.h"
 #include "rel_tetra_mesh_quality.h"
+#include "rel_tetra_mesh_statistics.h"
 
 namespace
 {
@@ -292,6 +294,11 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     // Recovery which does not converge is stopped by a limit of its own, unless the limit given by options is lower.
     boundary.setMaxSteinerVertices(std::min(maxSteinerNodes, 100 * uint64_t(nInputNodes) + 100000));
     boundary.initialize();
+    const size_t nInputSegments = size_t(std::count_if(boundary.getSubSegments().begin(), boundary.getSubSegments().end(),
+                                                       [](const RBoundaryRecovery::SubSegment &segment)
+                                                       {
+                                                           return segment.alive;
+                                                       }));
     boundary.recover();
 
     if (options.getVerbose())
@@ -497,9 +504,14 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     profile.addWork(optimizer.getProfile());
     progress.initialize("Checking mesh quality");
     RTetraMeshQuality::Summary quality;
+    RTetraMeshStatistics::Statistics statistics;
     {
         RTetraMeshProfile::Timer timer(profile.diagnostics);
         quality = RTetraMeshQuality::summarize(output, options);
+        if (options.getVerbose())
+        {
+            statistics = RTetraMeshStatistics::measure(input, output);
+        }
     }
     totalTimer.finish(); // Excludes optional report serialization and logging.
     if (!options.getQualityReportPath().empty())
@@ -514,7 +526,31 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
     if (options.getVerbose())
     {
+        progress.initialize("Reporting mesh statistics");
         progress.beginLog();
+        RTetraMeshStatistics::Counts counts;
+        counts.inputSegments = nInputSegments;
+        counts.meshSegments = size_t(std::count_if(boundary.getSubSegments().begin(), boundary.getSubSegments().end(),
+                                                   [](const RBoundaryRecovery::SubSegment &segment)
+                                                   {
+                                                       return segment.alive;
+                                                   }));
+        counts.meshRegions = size_t(nRegions);
+        counts.steinerOnFacets = boundary.getNSteinerVertices(RBoundaryRecovery::VertexFacet);
+        counts.steinerOnSegments = boundary.getNSteinerVertices(RBoundaryRecovery::VertexSegment);
+        counts.steinerInside = boundary.getNSteinerVertices(RBoundaryRecovery::VertexVolume);
+        counts.midEdgeNodes = size_t(nMidEdgeNodes);
+        if (reconstruct)
+        {
+            std::set<int> regions;
+            for (const auto &tetrahedron : input.getTetrahedra())
+            {
+                regions.insert(tetrahedron.marker);
+            }
+            counts.inputRegions = regions.size();
+        }
+        RTetraMeshStatistics::print(input, output, counts, statistics);
+        RLogger::info("\n");
         RLogger::info("Mesh phases (s): tetrahedralization %.3f, boundary %.3f, initial repair %.3f, refinement %.3f, optimization %.3f, diagnostics %.3f, total %.3f.\n",
                       profile.tetrahedralization, profile.boundary, profile.initialRepair, profile.refinement, profile.optimization, profile.diagnostics, profile.total);
         RLogger::info("Mesh work: %llu quality measurements, %llu quality cache hits, %llu star searches, %llu star cache hits, %llu local trial replacements.\n",

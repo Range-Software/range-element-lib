@@ -11,6 +11,7 @@ set(range_element_lib_tests
     tst_geometric_predicates
     tst_delaunay_tetrahedralizer
     tst_tetra_mesher
+    tst_tetra_mesh_statistics
     tst_tetra_mesh_optimizer
 )
 
