@@ -5,9 +5,11 @@
 #include <array>
 #include <map>
 
+#include <rbl_logger.h>
+#include <rbl_progress.h>
+
 #include "rel_geometric_predicates.h"
 #include "rel_tetra_mesh_refiner.h"
-#include "rel_tetra_mesh_progress.h"
 #include "rel_tetra_mesh_optimizer.h"
 
 namespace
@@ -363,7 +365,9 @@ bool RTetraMeshRefiner::refineTetra(const BadTetra &badTetra, const Quality &qua
 
 void RTetraMeshRefiner::refine()
 {
-    RTetraMeshProgress progress("Refining mesh");
+    RLogger::info("Refining mesh\n");
+    RLogger::indent();
+
     this->stopped = false;
     this->spacingRejections = this->boundaryRejections = 0;
     this->boundary.setCollectCreatedTetras(true);
@@ -402,11 +406,11 @@ void RTetraMeshRefiner::refine()
 
     for (int pass = 0; pass < maxPasses && !this->stopped; pass++)
     {
-        progress.initialize(QString("Refining mesh: preparing pass %1 of %2").arg(pass + 1).arg(maxPasses));
+        RLogger::info(QString("Pass %1 of %2\n").arg(pass + 1).arg(maxPasses).toUtf8().constData());
         // Regions are found again, as tetrahedra created at the boundary may have taken a wrong one.
         this->boundary.classifyRegions();
 
-        progress.initialize(QString("Refining mesh: finding bad cells, pass %1 of %2").arg(pass + 1).arg(maxPasses), false);
+        RProgressInitialize(QString("Refining mesh: finding bad cells, pass %1 of %2").arg(pass + 1).arg(maxPasses), false);
         const int nSlots = this->mesh.getNTetraSlots();
         for (int i = 0; i < nSlots; i++)
         {
@@ -414,8 +418,9 @@ void RTetraMeshRefiner::refine()
             {
                 enqueue(i, 0);
             }
-            progress.print(uint64_t(i) + 1, uint64_t(nSlots));
+            RProgressPrint(uint64_t(i) + 1, uint64_t(nSlots));
         }
+        RProgressFinalize();
         if (queue.empty())
         {
             break;
@@ -423,19 +428,11 @@ void RTetraMeshRefiner::refine()
 
         const uint64_t nVerticesBefore = this->boundary.getNSteinerVertices();
 
-        progress.initialize(QString("Refining mesh: pass %1 of %2").arg(pass + 1).arg(maxPasses));
+        RProgressInitialize(QString("Refining mesh: pass %1 of %2").arg(pass + 1).arg(maxPasses),false);
         uint64_t processed = 0;
         while (!queue.empty())
         {
-            progress.pulse([&]()
-                           {
-                               return QString("Refining mesh: pass %1 of %2, %3 cells processed, %4 queued, %5 nodes added")
-                                   .arg(pass + 1)
-                                   .arg(maxPasses)
-                                   .arg(processed)
-                                   .arg(qulonglong(queue.size()))
-                                   .arg(qulonglong(this->boundary.getNSteinerVertices()));
-                           });
+            RProgressPrint(processed,queue.size());
             ++processed;
             if (this->boundary.getNSteinerVertices() >= this->maxSteinerVertices)
             {
@@ -500,6 +497,7 @@ void RTetraMeshRefiner::refine()
                 }
             }
         }
+        RProgressFinalize();
 
         while (!queue.empty())
         {
@@ -514,4 +512,6 @@ void RTetraMeshRefiner::refine()
 
     this->profile = optimizer.getProfile();
     this->boundary.setCollectCreatedTetras(false);
+
+    RLogger::unindent();
 }

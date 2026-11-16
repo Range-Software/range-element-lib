@@ -1,17 +1,17 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <map>
 #include <set>
 #include <queue>
 #include <functional>
 
 #include <rbl_error.h>
+#include <rbl_logger.h>
+#include <rbl_progress.h>
 
 #include "rel_geometric_predicates.h"
 #include "rel_delaunay_tetrahedralizer.h"
 #include "rel_tetra_mesh_optimizer.h"
-#include "rel_tetra_mesh_progress.h"
 #include "rel_tetra_mesh_quality.h"
 
 namespace
@@ -1910,7 +1910,8 @@ bool RTetraMeshOptimizer::boundaryPatch(int id)
 unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
 {
     RTetraMeshProfile::Timer timer(profile.orderedRepair);
-    RTetraMeshProgress progress(moveVertices ? "Optimizing mesh: preparing repair sweeps" : "Repairing initial mesh");
+    RLogger::info(moveVertices ? "Optimizing mesh: preparing repair sweeps\n" : "Repairing initial mesh\n");
+
     orderedRepairActive = true;
     unsigned int changes = 0;
     // Vertices of each cell when it was last scheduled, and the list generation it went to.
@@ -1918,15 +1919,19 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
     std::vector<std::array<int, 4>> scheduledCells;
     std::vector<unsigned int> scheduledMarks;
     unsigned int scheduleMark = 0;
+
     for (int stage = 0; stage < 2; stage++)
     {
-        progress.initialize(stage == 0 ? "Repairing mesh: preparing Delaunay sweeps" : "Optimizing mesh: preparing quality sweeps");
+        RLogger::info(stage == 0 ? "Repairing mesh: preparing Delaunay sweeps\n" : "Optimizing mesh: preparing quality sweeps\n");
+        RLogger::indent();
+
         // Work for the next sweep is appended as it is found and put in order when the
         // sweep starts, which visits the same keys in the same order as ordered sets would.
         std::vector<std::array<int, 3>> faces;
         std::vector<std::array<int, 2>> edges;
         std::vector<int> vertices;
         size_t faceLimit = 0, edgeLimit = 0, vertexLimit = 0;
+
         auto schedule = [&](int id)
         {
             if (!mesh.isAlive(id) || mesh.isGhost(id))
@@ -1997,11 +2002,14 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
             vertices.clear();
             faceLimit = edgeLimit = vertexLimit = 65536;
             ++scheduleMark;
-            progress.initialize(QString("%1: sweep %2 of %3")
-                                    .arg(stage == 0 ? "Repairing mesh Delaunayness" : "Optimizing mesh quality")
-                                    .arg(wave + 1)
-                                    .arg(stage == 0 ? 5 : 8),
-                                false);
+
+            QString logMessage(QString("%1: sweep %2 of %3")
+                .arg(stage == 0 ? "Repairing mesh Delaunayness" : "Optimizing mesh quality")
+                .arg(wave + 1)
+                .arg(stage == 0 ? 5 : 8));
+            RLogger::info("%s\n", logMessage.toUtf8().constData());
+            RProgressInitialize(logMessage,false);
+
             const uint64_t total = currentFaces.size() + currentEdges.size() + currentVertices.size();
             uint64_t processed = 0;
             auto reschedule = [&]()
@@ -2043,7 +2051,7 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
                     changes++;
                     reschedule();
                 }
-                progress.print(++processed, total);
+                RProgressPrint(++processed, total);
             }
             for (const auto &e : currentEdges)
             {
@@ -2053,7 +2061,7 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
                     changes++;
                     reschedule();
                 }
-                progress.print(++processed, total);
+                RProgressPrint(++processed, total);
             }
             for (int v : currentVertices)
             {
@@ -2063,13 +2071,15 @@ unsigned int RTetraMeshOptimizer::orderedRepair(bool moveVertices)
                     changes++;
                     reschedule();
                 }
-                progress.print(++processed, total);
+                RProgressPrint(++processed, total);
             }
+            RProgressFinalize();
         }
         if (!faces.empty() || !edges.empty() || !vertices.empty())
         {
             budgetStops++;
         }
+        RLogger::unindent();
     }
     orderedRepairActive = false;
     return changes;
@@ -2104,7 +2114,7 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
     };
 
     unsigned int changes = orderedRepair(true);
-    RTetraMeshProgress progress("Optimizing mesh: preparing bounded patch repairs");
+    RLogger::info("Optimizing mesh: preparing bounded patch repairs\n");
     remeshAttempts = compoundAttempts = boundaryAttempts = 0;
     // Ordered repair already restored Delaunayness and quality. The finishing
     // queue must not run another Delaunay stage which can undo sliver repairs.
@@ -2148,14 +2158,15 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
         }
         const size_t budget = queue.size() * (stage == 0 ? 4 : 8) + 64;
         size_t processed = 0;
+
+
+        RProgressInitialize(QString("Optimizing mesh: %1 patches visited, %2 queued")
+                                .arg(qulonglong(processed))
+                                .arg(qulonglong(queue.size())));
+
         while (!queue.empty() && processed < budget)
         {
-            progress.pulse([&]()
-                           {
-                               return QString("Optimizing mesh: %1 patches visited, %2 queued")
-                                   .arg(qulonglong(processed))
-                                   .arg(qulonglong(queue.size()));
-                           });
+            RProgressPrint(0.0);
             const auto entry = queue.top();
             queue.pop();
             auto queued = pending.find(entry.vertices);
@@ -2295,6 +2306,7 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
                 }
             }
         }
+        RProgressFinalize();
         if (!queue.empty())
         {
             budgetStops++;

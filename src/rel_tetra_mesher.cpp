@@ -9,12 +9,12 @@
 
 #include <rbl_error.h>
 #include <rbl_logger.h>
+#include <rbl_progress.h>
 
 #include "rel_boundary_recovery.h"
 #include "rel_delaunay_tetrahedralizer.h"
 #include "rel_geometric_predicates.h"
 #include "rel_tetra_mesh.h"
-#include "rel_tetra_mesh_progress.h"
 #include "rel_tetra_mesh_refiner.h"
 #include "rel_tetra_mesher.h"
 #include "rel_tetra_mesh_optimizer.h"
@@ -178,7 +178,9 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
 void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *resultProfile)
 {
-    RTetraMeshProgress progress("Preparing volume mesh");
+    RLogger::info("Preparing volume mesh\n");
+    RLogger::indent();
+
     RTetraMeshProfile profile;
     RTetraMeshProfile::Timer totalTimer(profile.total);
     const std::vector<RTetraMeshData::Node> &rInputNodes = input.getNodes();
@@ -189,11 +191,13 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     if (options.getElementOrder() != 1 && options.getElementOrder() != 2)
     {
+        RLogger::unindent();
         throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Order of generated elements must be 1 or 2 (%d).", options.getElementOrder());
     }
 
     if (input.getTriangles().empty() && !reconstruct)
     {
+        RLogger::unindent();
         throw RError(RError::Type::InvalidInput, R_ERROR_REF, "There are no triangles to generate tetrahedra from.");
     }
 
@@ -215,10 +219,9 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
     const double modelSize = std::hypot(upper[0] - lower[0], upper[1] - lower[1], upper[2] - lower[2]);
 
-    progress.initialize("Tetrahedralizing nodes");
+    RLogger::info("Tetrahedralizing nodes\n");
     if (options.getVerbose())
     {
-        progress.beginLog();
         RLogger::info("Tetrahedralizing %d nodes.\n", nInputNodes);
     }
 
@@ -240,13 +243,12 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
     if (nDuplicates > 0)
     {
-        progress.beginLog();
         RLogger::warning("Found %d nodes with the same or nearly the same coordinates as other nodes, they are not used in generated mesh.\n", nDuplicates);
     }
 
     // Boundary.
 
-    progress.initialize("Recovering mesh boundary");
+    RLogger::info("Recovering mesh boundary\n");
     RTetraMeshProfile::Timer boundaryTimer(profile.boundary);
     RBoundaryRecovery boundary(mesh, options.getTolerance());
     boundary.setMinLength(minLengthRatio * modelSize);
@@ -285,7 +287,6 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     if (options.getVerbose())
     {
-        progress.beginLog();
         RLogger::info("Recovering boundary.\n");
     }
 
@@ -303,20 +304,18 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     if (options.getVerbose())
     {
-        progress.beginLog();
         RLogger::info("Boundary was recovered with %llu nodes added on edges and %llu nodes added on triangles.\n",
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexSegment)),
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexFacet)));
     }
 
-    progress.initialize("Classifying mesh regions");
+    RLogger::info("Classifying mesh regions");
     int nRegions = boundary.classifyRegions();
     if (nRegions == 0)
     {
         throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Triangles do not enclose any volume.");
     }
 
-    progress.finalize();
     boundaryTimer.finish();
     RTetraMeshOptimizer optimizer(mesh, boundary, options);
     {
@@ -329,10 +328,6 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     if (options.getQualityMesh())
     {
         RTetraMeshProfile::Timer refinementTimer(profile.refinement);
-        if (options.getVerbose())
-        {
-            RLogger::info("Refining mesh.\n");
-        }
 
         // The limit is checked before a tetrahedron is refined, which may need more than one node.
         boundary.setMaxSteinerVertices(std::numeric_limits<uint64_t>::max());
@@ -354,9 +349,9 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                              static_cast<unsigned long long>(boundary.getNSteinerVertices()));
         }
 
-        progress.initialize("Recovering refined mesh boundary");
+        RLogger::info("Recovering refined mesh boundary\n");
         boundary.recover();
-        progress.initialize("Classifying refined mesh regions");
+        RLogger::info("Classifying refined mesh regions\n");
         nRegions = boundary.classifyRegions();
         if (nRegions == 0)
         {
@@ -364,7 +359,6 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         }
     }
 
-    progress.finalize();
     if (options.getQualityMesh())
     {
         if (options.getVerbose())
@@ -377,7 +371,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     // Output.
 
-    progress.initialize("Preparing generated mesh output");
+    RLogger::info("Preparing generated mesh output\n");
     output.clear();
 
     std::vector<RTetraMeshData::Node> &rNodes = output.getNodes();
@@ -497,12 +491,12 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     int nMidEdgeNodes = 0;
     if (options.getElementOrder() == 2)
     {
-        progress.initialize("Creating mid-edge nodes");
+        RLogger::info("Creating mid-edge nodes\n");
         nMidEdgeNodes = output.createMidEdgeNodes();
     }
 
     profile.addWork(optimizer.getProfile());
-    progress.initialize("Checking mesh quality");
+    RLogger::info("Checking mesh quality\n");
     RTetraMeshQuality::Summary quality;
     RTetraMeshStatistics::Statistics statistics;
     {
@@ -516,7 +510,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     totalTimer.finish(); // Excludes optional report serialization and logging.
     if (!options.getQualityReportPath().empty())
     {
-        progress.initialize("Writing mesh quality report");
+        RLogger::info("Writing mesh quality report\n");
         const RTetraMeshQuality::Work work = {optimizer.getQueueVisits(), optimizer.getBudgetStops(), optimizer.getInsertedPoints(), optimizer.getOrderedVisits(), optimizer.getBoundaryPoints(), &profile};
         RTetraMeshQuality::writeReport(output, options, optimizer.getPatchAttempts(), options.getQualityReportPath(), &work);
     }
@@ -526,8 +520,8 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     }
     if (options.getVerbose())
     {
-        progress.initialize("Reporting mesh statistics");
-        progress.beginLog();
+        RLogger::info("Reporting mesh statistics\n");
+        RLogger::indent();
         RTetraMeshStatistics::Counts counts;
         counts.inputSegments = nInputSegments;
         counts.meshSegments = size_t(std::count_if(boundary.getSubSegments().begin(), boundary.getSubSegments().end(),
@@ -550,22 +544,39 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
             counts.inputRegions = regions.size();
         }
         RTetraMeshStatistics::print(input, output, counts, statistics);
-        RLogger::info("\n");
-        RLogger::info("Mesh phases (s): tetrahedralization %.3f, boundary %.3f, initial repair %.3f, refinement %.3f, optimization %.3f, diagnostics %.3f, total %.3f.\n",
-                      profile.tetrahedralization, profile.boundary, profile.initialRepair, profile.refinement, profile.optimization, profile.diagnostics, profile.total);
-        RLogger::info("Mesh work: %llu quality measurements, %llu quality cache hits, %llu star searches, %llu star cache hits, %llu local trial replacements.\n",
-                      static_cast<unsigned long long>(profile.qualityMeasurements), static_cast<unsigned long long>(profile.qualityCacheHits),
-                      static_cast<unsigned long long>(profile.starQueries), static_cast<unsigned long long>(profile.starCacheHits), static_cast<unsigned long long>(profile.trialReplacements));
+        RLogger::info("Mesh phases\n");
+        RLogger::indent();
+        RLogger::info("tetrahedralization:        %9.3f [s]\n", profile.tetrahedralization);
+        RLogger::info("boundary:                  %9.3f [s]\n", profile.boundary);
+        RLogger::info("initial repair:            %9.3f [s]\n", profile.initialRepair);
+        RLogger::info("refinement:                %9.3f [s]\n", profile.refinement);
+        RLogger::info("optimization:              %9.3f [s]\n", profile.optimization);
+        RLogger::info("diagnostics:               %9.3f [s]\n", profile.diagnostics);
+        RLogger::info("total:                     %9.3f [s]\n", profile.total);
+        RLogger::unindent(false);
+        RLogger::info("Mesh work\n");
+        RLogger::indent();
+        RLogger::info("quality measurements:      %9llu\n", static_cast<unsigned long long>(profile.qualityMeasurements));
+        RLogger::info("cache hits:                %9llu\n", static_cast<unsigned long long>(profile.qualityCacheHits));
+        RLogger::info("star searches:             %9llu\n", static_cast<unsigned long long>(profile.starQueries));
+        RLogger::info("star cache hits:           %9llu\n", static_cast<unsigned long long>(profile.starCacheHits));
+        RLogger::info("local trial replacements:  %9llu\n", static_cast<unsigned long long>(profile.trialReplacements));
+        RLogger::unindent(false);
         RLogger::info("Volume optimization visited %llu local cell patches, accepted %llu off-centers and reached %llu queue budgets.\n",
                       static_cast<unsigned long long>(optimizer.getQueueVisits()), static_cast<unsigned long long>(optimizer.getInsertedPoints()), static_cast<unsigned long long>(optimizer.getBudgetStops()));
         RLogger::info("Sub-degree angles: %llu elements have internal face pairs, %llu have prescribed face pairs (counts may overlap).\n",
                       static_cast<unsigned long long>(quality.freeBelowOne), static_cast<unsigned long long>(quality.prescribedBelowOne));
-        RLogger::info("Mesh quality: minimum dihedral = %g degrees, radius/edge p95 = %g, maximum = %g, nearly flat = %llu.\n",
-                      quality.minAngle, quality.radiusEdge95, quality.maxRadiusEdge, static_cast<unsigned long long>(quality.nearFlat));
+        RLogger::info("Mesh quality\n");
+        RLogger::indent();
+        RLogger::info("minimum dihedral:          %9g degrees\n", quality.minAngle);
+        RLogger::info("radius/edge p95:           %9g\n", quality.radiusEdge95);
+        RLogger::info("maximum:                   %9g\n", quality.maxRadiusEdge);
+        RLogger::info("nearly flat:               %9llu\n", static_cast<unsigned long long>(quality.nearFlat));
+        RLogger::unindent(false);
+        RLogger::unindent(false);
     }
     if (options.getQualityMesh() && !quality.targetsMet())
     {
-        progress.beginLog();
         RLogger::warning("Mesh quality targets remain unmet: %llu radius/edge, %llu dihedral, %llu volume/size, %llu nearly flat, %llu invalid elements (%llu elements have geometry-constrained angles).\n",
                          static_cast<unsigned long long>(quality.badRadius), static_cast<unsigned long long>(quality.badAngle),
                          static_cast<unsigned long long>(quality.tooLarge), static_cast<unsigned long long>(quality.nearFlat),
@@ -574,7 +585,6 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     if (options.getVerbose())
     {
-        progress.beginLog();
         RLogger::info("Generated %d tetrahedra in %d volumes with %llu nodes added (%llu on edges, %llu on triangles, %llu inside).\n",
                       nTetrahedra,
                       nRegions,
@@ -587,4 +597,5 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
             RLogger::info("Elements are quadratic, %d nodes were added in the middle of edges.\n", nMidEdgeNodes);
         }
     }
+    RLogger::unindent();
 }

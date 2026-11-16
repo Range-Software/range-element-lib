@@ -149,7 +149,7 @@ namespace
         std::vector<int> widths(header.size());
         for (size_t column = 0; column < header.size(); column++)
         {
-            widths[column] = int(header[column].size());
+            widths[column] = std::max(25, int(header[column].size()));
             for (const auto &row : rows)
             {
                 widths[column] = std::max(widths[column], int(row[column].size()));
@@ -186,7 +186,7 @@ namespace
         RLogger::indent();
         const auto finish = qScopeGuard([]()
                                         {
-                                            RLogger::unindent();
+                                            RLogger::unindent(false);
                                         });
         content();
     }
