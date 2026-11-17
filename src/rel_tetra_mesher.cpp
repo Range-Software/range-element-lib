@@ -544,23 +544,26 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
             counts.inputRegions = regions.size();
         }
         RTetraMeshStatistics::print(input, output, counts, statistics);
+
+        int textWidth = 26;
+        int numWidth = 25;
         RLogger::info("Mesh phases\n");
         RLogger::indent();
-        RLogger::info("tetrahedralization:        %9.3f [s]\n", profile.tetrahedralization);
-        RLogger::info("boundary:                  %9.3f [s]\n", profile.boundary);
-        RLogger::info("initial repair:            %9.3f [s]\n", profile.initialRepair);
-        RLogger::info("refinement:                %9.3f [s]\n", profile.refinement);
-        RLogger::info("optimization:              %9.3f [s]\n", profile.optimization);
-        RLogger::info("diagnostics:               %9.3f [s]\n", profile.diagnostics);
-        RLogger::info("total:                     %9.3f [s]\n", profile.total);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "tetrahedralization:", numWidth, profile.tetrahedralization);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "boundary:", numWidth, profile.boundary);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "initial repair:", numWidth, profile.initialRepair);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "refinement:", numWidth, profile.refinement);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "optimization:", numWidth, profile.optimization);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "diagnostics:", numWidth, profile.diagnostics);
+        RLogger::info("%-*s %*.3f [s]\n", textWidth, "total:", numWidth, profile.total);
         RLogger::unindent(false);
         RLogger::info("Mesh work\n");
         RLogger::indent();
-        RLogger::info("quality measurements:      %9llu\n", static_cast<unsigned long long>(profile.qualityMeasurements));
-        RLogger::info("cache hits:                %9llu\n", static_cast<unsigned long long>(profile.qualityCacheHits));
-        RLogger::info("star searches:             %9llu\n", static_cast<unsigned long long>(profile.starQueries));
-        RLogger::info("star cache hits:           %9llu\n", static_cast<unsigned long long>(profile.starCacheHits));
-        RLogger::info("local trial replacements:  %9llu\n", static_cast<unsigned long long>(profile.trialReplacements));
+        RLogger::info("%-*s %*llu\n", textWidth, "quality measurements:", numWidth, static_cast<unsigned long long>(profile.qualityMeasurements));
+        RLogger::info("%-*s %*llu\n", textWidth, "cache hits:", numWidth, static_cast<unsigned long long>(profile.qualityCacheHits));
+        RLogger::info("%-*s %*llu\n", textWidth, "star searches:", numWidth, static_cast<unsigned long long>(profile.starQueries));
+        RLogger::info("%-*s %*llu\n", textWidth, "star cache hits:", numWidth, static_cast<unsigned long long>(profile.starCacheHits));
+        RLogger::info("%-*s %*llu\n", textWidth, "local trial replacements:", numWidth, static_cast<unsigned long long>(profile.trialReplacements));
         RLogger::unindent(false);
         RLogger::info("Volume optimization visited %llu local cell patches, accepted %llu off-centers and reached %llu queue budgets.\n",
                       static_cast<unsigned long long>(optimizer.getQueueVisits()), static_cast<unsigned long long>(optimizer.getInsertedPoints()), static_cast<unsigned long long>(optimizer.getBudgetStops()));
@@ -568,10 +571,10 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                       static_cast<unsigned long long>(quality.freeBelowOne), static_cast<unsigned long long>(quality.prescribedBelowOne));
         RLogger::info("Mesh quality\n");
         RLogger::indent();
-        RLogger::info("minimum dihedral:          %9g degrees\n", quality.minAngle);
-        RLogger::info("radius/edge p95:           %9g\n", quality.radiusEdge95);
-        RLogger::info("maximum:                   %9g\n", quality.maxRadiusEdge);
-        RLogger::info("nearly flat:               %9llu\n", static_cast<unsigned long long>(quality.nearFlat));
+        RLogger::info("%-*s %*.3g [deg]\n", textWidth, "minimum dihedral:", numWidth, quality.minAngle);
+        RLogger::info("%-*s %*.3g\n", textWidth, "radius/edge p95:", numWidth, quality.radiusEdge95);
+        RLogger::info("%-*s %*.3g\n", textWidth, "maximum:", numWidth, quality.maxRadiusEdge);
+        RLogger::info("%-*s %*llu\n", textWidth, "nearly flat:", numWidth, static_cast<unsigned long long>(quality.nearFlat));
         RLogger::unindent(false);
         RLogger::unindent(false);
     }

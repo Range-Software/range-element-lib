@@ -57,7 +57,7 @@ class RTetraMeshStatistics
         //! separately and excluded from quality ranges and histograms.
         static Statistics measure(const RTetraMeshData &input, const RTetraMeshData &output);
 
-        //! Print Range-style indented sections and bordered tables.
+        //! Print Range-style indented sections and aligned plain-text tables.
         //! Each row is one complete logger message.
         static void print(const RTetraMeshData &input, const RTetraMeshData &output,
                           const Counts &counts, const Statistics &statistics);

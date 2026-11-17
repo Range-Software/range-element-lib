@@ -187,26 +187,36 @@ class TestTetraMeshStatistics : public QObject
             QVERIFY(!log.contains("asp.ratio"));
             QVERIFY(!log.contains("facangle"));
             QVERIFY(!log.contains('%'));
-            QVERIFY(QRegularExpression("\\|\\s*Nodes\\s*\\|\\s*4\\s*\\|").match(log).hasMatch());
-            int tableWidth = -1, rows = 0;
+            QVERIFY(!log.contains('|'));
+            QVERIFY(QRegularExpression("(?m)^\\s*Nodes:\\s+4\\s*$").match(log).hasMatch());
+            int tableWidth = -1, rows = 0, tables = 0;
+            QString previousLine;
             for (const QString &line : log.split('\n'))
             {
                 const QString trimmed = line.trimmed();
-                if (trimmed.startsWith('+'))
+                if (QRegularExpression("^=+$").match(trimmed).hasMatch())
                 {
                     tableWidth = trimmed.size();
+                    QCOMPARE(tableWidth, previousLine.size());
+                    QVERIFY(tableWidth >= 52); // Two columns of at least 25 characters.
+                    tables++;
                 }
-                else if (trimmed.startsWith('|'))
+                else if (tableWidth > 0 && QRegularExpression("^[^:]+:\\s+\\S").match(trimmed).hasMatch())
                 {
-                    QVERIFY(tableWidth > 0);
                     QCOMPARE(trimmed.size(), tableWidth);
                     rows++;
                 }
+                else if (trimmed.startsWith('}'))
+                {
+                    tableWidth = -1;
+                }
+                previousLine = trimmed;
             }
+            QCOMPARE(tables, 6);
             QVERIFY(rows > 60);
             for (const QString &message : messages)
             {
-                if (message.contains('|') || message.contains("Aspect ratio ="))
+                if (message.contains(':') || message.trimmed().startsWith('='))
                 {
                     QCOMPARE(message.count('\n'), 1);
                 }

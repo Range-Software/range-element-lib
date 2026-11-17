@@ -382,7 +382,7 @@ void RTetraMeshRefiner::refine()
         const Quality quality = this->findQuality(tetraID);
         if (!quality.bad)
         {
-            return;
+            return 0;
         }
         const auto &t = this->mesh.getTetra(tetraID);
         auto key = std::array<int, 4>{t.v[0], t.v[1], t.v[2], t.v[3]};
@@ -390,7 +390,7 @@ void RTetraMeshRefiner::refine()
         auto queued = pending.find(key);
         if (queued != pending.end() && queued->second == tetraID)
         {
-            return;
+            return 0;
         }
         pending[key] = tetraID;
         BadTetra badTetra;
@@ -402,6 +402,7 @@ void RTetraMeshRefiner::refine()
         }
         badTetra.nAttempts = nAttempts;
         queue.push(badTetra);
+        return 1;
     };
 
     for (int pass = 0; pass < maxPasses && !this->stopped; pass++)
@@ -430,9 +431,10 @@ void RTetraMeshRefiner::refine()
 
         RProgressInitialize(QString("Refining mesh: pass %1 of %2").arg(pass + 1).arg(maxPasses),false);
         uint64_t processed = 0;
+        uint64_t enqueued = queue.size();
         while (!queue.empty())
         {
-            RProgressPrint(processed,queue.size());
+            RProgressPrint(processed,enqueued);
             ++processed;
             if (this->boundary.getNSteinerVertices() >= this->maxSteinerVertices)
             {
@@ -477,7 +479,7 @@ void RTetraMeshRefiner::refine()
             {
                 if (this->mesh.isAlive(tetraID))
                 {
-                    enqueue(tetraID, 0);
+                    enqueued += enqueue(tetraID, 0);
                 }
             }
             rCreated.clear();

@@ -152,31 +152,31 @@ namespace
             widths[column] = std::max(25, int(header[column].size()));
             for (const auto &row : rows)
             {
-                widths[column] = std::max(widths[column], int(row[column].size()));
+                const int labelSuffix = column == 0 ? 1 : 0;
+                widths[column] = std::max(widths[column], int(row[column].size()) + labelSuffix);
             }
         }
-        QString border = "+";
-        for (int width : widths)
+        auto formatRow = [&](const TableRow &row, bool data)
         {
-            border += " " + QString(width, '-') + " +";
-        }
-        auto printRow = [&](const TableRow &row)
-        {
-            QString line = "|";
+            QString line;
             for (size_t column = 0; column < row.size(); column++)
             {
-                line += QString(" %1 |").arg(row[column], column == 0 ? -widths[column] : widths[column]);
+                if (column > 0)
+                {
+                    line += "  ";
+                }
+                const QString value = row[column] + (data && column == 0 ? ":" : "");
+                line += QString("%1").arg(value, column == 0 ? -widths[column] : widths[column]);
             }
-            RLogger::info("%s\n", line.toUtf8().constData());
+            return line;
         };
-        RLogger::info("%s\n", border.toUtf8().constData());
-        printRow(header);
-        RLogger::info("%s\n", border.toUtf8().constData());
+        const QString heading = formatRow(header, false);
+        RLogger::info("%s\n", heading.toUtf8().constData());
+        RLogger::info("%s\n", QString(heading.size(), '=').toUtf8().constData());
         for (const auto &row : rows)
         {
-            printRow(row);
+            RLogger::info("%s\n", formatRow(row, true).toUtf8().constData());
         }
-        RLogger::info("%s\n", border.toUtf8().constData());
     }
 
     template <typename Content>
@@ -376,6 +376,7 @@ void RTetraMeshStatistics::print(const RTetraMeshData &input, const RTetraMeshDa
                                                                      rangeRow("Aspect ratio", statistics.aspectRatio),
                                                                      rangeRow("Face angle [deg]", statistics.faceAngle),
                                                                      rangeRow("Dihedral angle [deg]", statistics.dihedralAngle)});
+                     RLogger::info("\n");
                      RLogger::info("Aspect ratio = longest edge length / minimum tetrahedron altitude.\n");
                      if (std::isfinite(statistics.minimumInputFaceAngle))
                      {

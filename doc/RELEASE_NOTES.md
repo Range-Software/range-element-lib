@@ -21,8 +21,8 @@ triangulated surface.
 
 ### Features
 
-- Verbose mesh generation uses indented sections and bordered tables for input
-  and output counts, boundary and added-node counts, volume and edge-length ranges,
+- Verbose mesh generation uses indented sections and aligned plain-text tables for
+  input and output counts, boundary and added-node counts, volume and edge-length ranges,
   aspect ratios, face angles and dihedral angles. Histograms use the same bins as
   TetGen; aspect ratio is longest edge divided by shortest tetrahedron altitude.
   Input face and dihedral angle minima are included. Quadratic meshes are measured
