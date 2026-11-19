@@ -1047,7 +1047,17 @@ bool RTetraMesh::replaceTetras(const std::vector<int> &oldIDs, const std::vector
     return replaceTetrasImpl(oldIDs, vertices, nullptr);
 }
 
-bool RTetraMesh::replaceTetrasImpl(const std::vector<int> &oldIDs, const std::vector<std::array<int, 4>> &vertices, ReplacementUndo *undo)
+bool RTetraMesh::removePoint(int pointID, const std::vector<int> &oldIDs, const std::vector<std::array<int, 4>> &vertices)
+{
+    return replaceTetrasImpl(oldIDs, vertices, nullptr, pointID);
+}
+
+bool RTetraMesh::isPointUsed(int pointID) const
+{
+    return this->vertexTetras[size_t(pointID)] != noTetra;
+}
+
+bool RTetraMesh::replaceTetrasImpl(const std::vector<int> &oldIDs, const std::vector<std::array<int, 4>> &vertices, ReplacementUndo *undo, int removedPointID)
 {
     using Key = std::array<int, 3>;
 
@@ -1166,6 +1176,15 @@ bool RTetraMesh::replaceTetrasImpl(const std::vector<int> &oldIDs, const std::ve
             }
         }
     }
+    if (removedPointID >= 0)
+    {
+        // The removed point has to be used by the old cells only, so all its cells are replaced.
+        if (!oldPoints.count(removedPointID) || newPoints.count(removedPointID))
+        {
+            return false;
+        }
+        newPoints.insert(removedPointID);
+    }
     if (oldPoints != newPoints)
     {
         return false;
@@ -1264,6 +1283,10 @@ bool RTetraMesh::replaceTetrasImpl(const std::vector<int> &oldIDs, const std::ve
         this->tetras[size_t(id)].v[0] = deadVertex;
         this->freeTetras.push_back(id);
         this->nTetras--;
+    }
+    if (removedPointID >= 0)
+    {
+        this->vertexTetras[size_t(removedPointID)] = noTetra;
     }
     this->lastTetra = this->createdTetras.front();
     this->cavityStamp += 4;

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -96,7 +97,9 @@ class RBoundaryRecovery
             //! Flip edge if its subfaces are not Delaunay.
             FlipDelaunay,
             //! Flip edge if vertices of its subfaces lie on one circle.
-            FlipCocircular
+            FlipCocircular,
+            //! Flip edge whenever the flip is valid, to follow a triangulation which is given elsewhere.
+            FlipAny
         };
 
         //! Edge around subfaces which are replaced by subfaces connecting a new vertex.
@@ -165,6 +168,11 @@ class RBoundaryRecovery
         unsigned int facetStamp;
         //! Point count of the last planar-patch matching attempt for each subface.
         std::vector<int> facetMatchPoints;
+        //! Edges of the tetrahedralization which were inserted into facets. Each edge is inserted
+        //! only once, so that flips inserting it can not be repeated with flips restoring Delaunay property.
+        std::set<uint64_t> insertedFacetEdges;
+        //! Whether facets may take edges of the tetrahedralization.
+        bool facetEdgeInsertion = false;
         //! Detailed reason for the most recent unsuccessful split.
         const char *lastSplitFailure = "No valid boundary cavity could be constructed";
         //! Function telling whether a face of a tetrahedron blocks a cavity.
@@ -243,6 +251,25 @@ class RBoundaryRecovery
 
         bool splitSubFaceAt(int faceID, double minRadius, bool centroid);
 
+        //! Find an edge of the tetrahedralization which connects two boundary vertices lying in the plane
+        //! of a missing subface, and which crosses an edge of the subface. Such an edge shows that the
+        //! tetrahedralization triangulates the facet differently from its subfaces.
+        bool findInPlaneEdge(int faceID, int &u, int &v) const;
+
+        //! Flip edges of a facet which an edge crosses until the edge is a part of the facet.
+        //! Return true if anything was flipped.
+        bool insertFacetEdge(int faceID, int u, int v);
+
+        //! Remove an added boundary vertex by merging it into a neighbor, which it shares an edge
+        //! of a subface or a subsegment with. Return false if nothing is changed, which is when the
+        //! merge would change the shape of the boundary or would make an inverted or flat tetrahedron.
+        bool collapseEdge(int p, int q);
+
+        //! Flip an edge of the tetrahedralization, which is shared by two subfaces of a facet, to the
+        //! other diagonal of the subfaces. Tetrahedra around the edge are replaced so that the new
+        //! subfaces are their faces and so that none of them is flat. Return false if nothing is changed.
+        bool flipFacetEdge(int a, int b);
+
         //! Recover subface which is missing in the tetrahedralization.
         void recoverSubFace(int faceID);
 
@@ -254,8 +281,25 @@ class RBoundaryRecovery
         //! Independent trial state bound to a cloned mesh (callbacks never refer to the source).
         RBoundaryRecovery(RTetraMesh &mesh, const RBoundaryRecovery &source);
 
+        //! Take state of given recovery, whose mesh has been assigned to the mesh of this one.
+        void restore(const RBoundaryRecovery &source);
+
         //! Set length below which nothing is split.
         void setMinLength(double minLength);
+
+        //! Set whether facets may take edges of the tetrahedralization which lie in their plane
+        //! when their subfaces are missing. Facets then do not have to be Delaunay, which is meant
+        //! for the initial recovery only, not for refinement.
+        void setFacetEdgeInsertion(bool facetEdgeInsertion);
+
+        //! Remove added boundary vertices which are closer than given length to a neighbor on the
+        //! boundary. Recovery of a facet which is triangulated differently in the tetrahedralization
+        //! leaves such vertices, which refinement can not handle. Return the number of removed vertices.
+        uint64_t removeShortEdges(double minEdgeLength);
+
+        //! Flip edges of facets, which are not Delaunay, together with the tetrahedralization.
+        //! Refinement expects Delaunay facets. Return the number of flips.
+        uint64_t restoreFacetDelaunay();
 
         //! Set maximum number of added vertices.
         void setMaxSteinerVertices(uint64_t maxSteinerVertices);

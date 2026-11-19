@@ -26,6 +26,8 @@ namespace
 
     //! Length below which nothing is split, relative to size of the model.
     const double minLengthRatio = 1.0e-8;
+    //! Ratio of length of a boundary edge to size of the model, below which added vertices at it are removed after recovery.
+    const double cleanUpLengthRatio = 1.0e-4;
     //! Number of nodes which can be added if it is not limited by options.
     const uint64_t defaultMaxSteinerNodes = 5000000;
     //! Number of tetrahedra of each region which are used to find a region of input mesh.
@@ -300,7 +302,40 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                                                        {
                                                            return segment.alive;
                                                        }));
-    boundary.recover();
+    {
+        // Recovery by splitting fails when facets are triangulated differently in the tetrahedralization:
+        // parts of their missing subfaces converge to a point. Only then is recovery started again,
+        // allowing facets to take edges of the tetrahedralization, which leaves a worse boundary.
+        RTetraMesh initialMesh = mesh;
+        RBoundaryRecovery initialBoundary(initialMesh, boundary);
+        try
+        {
+            boundary.recover();
+        }
+        catch (const RError &rError)
+        {
+            RLogger::warning("Recovering mesh boundary again, with facets taking edges of the tetrahedralization: %s\n",
+                             rError.getMessage().toUtf8().constData());
+            mesh = std::move(initialMesh);
+            boundary.restore(initialBoundary);
+            boundary.setFacetEdgeInsertion(true);
+            boundary.recover();
+        }
+    }
+    {
+        // Facets which are triangulated differently in the tetrahedralization leave clusters of
+        // added vertices and needle-like subfaces, which refinement can not handle. Those vertices
+        // are removed and facets are made Delaunay again, as far as the tetrahedralization allows.
+        const uint64_t nRemoved = boundary.removeShortEdges(cleanUpLengthRatio * modelSize);
+        boundary.recover();
+        const uint64_t nFlips = boundary.restoreFacetDelaunay();
+        if (options.getVerbose())
+        {
+            RLogger::info("Removed %llu added boundary nodes and flipped %llu facet edges.\n",
+                          static_cast<unsigned long long>(nRemoved), static_cast<unsigned long long>(nFlips));
+        }
+    }
+    boundary.setFacetEdgeInsertion(false);
 
     if (options.getVerbose())
     {
@@ -376,8 +411,20 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
     std::vector<RTetraMeshData::Node> &rNodes = output.getNodes();
     rNodes = rInputNodes;
+    // Added nodes which were removed again are left out.
+    std::vector<int> pointMap(size_t(mesh.getNPoints()));
+    for (int i = 0; i < mesh.getNPoints(); i++)
+    {
+        pointMap[size_t(i)] = i;
+    }
     for (int i = nInputNodes; i < mesh.getNPoints(); i++)
     {
+        if (!mesh.isPointUsed(i))
+        {
+            pointMap[size_t(i)] = -1;
+            continue;
+        }
+        pointMap[size_t(i)] = int(rNodes.size());
         const double *p = mesh.getPoint(i);
         output.addNode(p[0], p[1], p[2], RTetraMeshData::noMarker, boundary.getVertexSize(i));
     }
@@ -464,7 +511,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
         RTetraMeshData::Tetrahedron tetrahedron;
         for (int j = 0; j < 4; j++)
         {
-            tetrahedron.nodeIDs[j] = rTetra.v[j];
+            tetrahedron.nodeIDs[j] = pointMap[size_t(rTetra.v[j])];
             tetrahedron.neighborIDs[j] = tetraMap[size_t(rTetra.n[j])];
         }
         tetrahedron.marker = regionMarkers[size_t(rTetra.region)];
@@ -475,14 +522,14 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
     {
         if (rFace.alive)
         {
-            output.addTriangle(rFace.v[0], rFace.v[1], rFace.v[2], rFace.marker);
+            output.addTriangle(pointMap[size_t(rFace.v[0])], pointMap[size_t(rFace.v[1])], pointMap[size_t(rFace.v[2])], rFace.marker);
         }
     }
     for (const RBoundaryRecovery::SubSegment &rSegment : boundary.getSubSegments())
     {
         if (rSegment.alive && rSegment.marker != RBoundaryRecovery::noMarker)
         {
-            output.addEdge(rSegment.v[0], rSegment.v[1], rSegment.marker);
+            output.addEdge(pointMap[size_t(rSegment.v[0])], pointMap[size_t(rSegment.v[1])], rSegment.marker);
         }
     }
 

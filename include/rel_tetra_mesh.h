@@ -106,7 +106,7 @@ class RTetraMesh
     private:
 
         struct ReplacementUndo;
-        bool replaceTetrasImpl(const std::vector<int> &, const std::vector<std::array<int, 4>> &, ReplacementUndo *);
+        bool replaceTetrasImpl(const std::vector<int> &, const std::vector<std::array<int, 4>> &, ReplacementUndo *, int removedPointID = -1);
 
         //! Return position of a new tetrahedron.
         int allocateTetra();
@@ -240,6 +240,13 @@ class RTetraMesh
         //! Replace a finite, single-region cluster atomically. The oriented boundary must be identical.
         //! Invalid/nonmanifold proposals leave the mesh unchanged.
         bool replaceTetras(const std::vector<int> &oldIDs, const std::vector<std::array<int, 4>> &vertices);
+
+        //! Replace a cluster like replaceTetras(), but the new tetrahedra do not use given point,
+        //! which must be used by the old ones. The point is then not a part of the tetrahedralization.
+        bool removePoint(int pointID, const std::vector<int> &oldIDs, const std::vector<std::array<int, 4>> &vertices);
+
+        //! Return true if a point is used by a tetrahedron.
+        bool isPointUsed(int pointID) const;
 
         //! Scoped, nestable speculative replacements. Does not support point insertion
         //! or other mesh mutations while active. Rolls back every successful replacement.
