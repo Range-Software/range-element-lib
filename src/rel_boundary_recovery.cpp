@@ -16,6 +16,9 @@ namespace
 
     //! Relative distance below which a point is considered to lie on an edge of a subface.
     const double onEdgeTolerance = 1.0e-9;
+    //! Ratio of a distance of a split point from an interior facet edge to the edge length, below which
+    //! the point is moved onto the edge, as it would otherwise create a nearly degenerate subface.
+    const double snapToEdgeTolerance = 1.0e-2;
     //! Relative margin by which a vertex has to lie inside of a circle to flip an edge.
     const double flipTolerance = 1.0e-9;
     //! Relative distance from a circle below which a vertex is considered to lie on it.
@@ -1618,7 +1621,7 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
             center[i] = a + ((this->mesh.getPoint(face.v[1])[i] - a) + (this->mesh.getPoint(face.v[2])[i] - a)) / 3.0;
         }
     }
-    const FacetLocation location = this->locateInFacet(faceID, center);
+    FacetLocation location = this->locateInFacet(faceID, center);
     if (location.segmentID >= 0)
     {
         // The center lies behind a subsegment or on it.
@@ -1649,6 +1652,42 @@ bool RBoundaryRecovery::splitSubFaceAt(int faceID, double minRadius, bool centro
 
     // Subfaces of a facet do not have to lie exactly in one plane.
     const SubFace target = this->faces[size_t(location.faceID)];
+
+    // A circumcenter of a nearly right triangle lies next to its longest edge. A vertex there would form
+    // a nearly degenerate subface with that edge, which is kept as long as it agrees with the tetrahedra.
+    // An interior facet edge is split instead, together with both of its subfaces.
+    if (!location.onEdge && !centroid)
+    {
+        double bestDistance = std::numeric_limits<double>::max();
+        for (int i = 0; i < 3; i++)
+        {
+            const int a = target.v[i];
+            const int b = target.v[(i + 1) % 3];
+            if (this->findSubSegment(a, b) >= 0)
+            {
+                continue;
+            }
+            auto iter = this->edgeFaces.find(findEdgeKey(a, b));
+            if (iter == this->edgeFaces.end() || iter->second.size() != 2)
+            {
+                continue;
+            }
+            double edge[3], offset[3], product[3];
+            subtract(this->mesh.getPoint(b), this->mesh.getPoint(a), edge);
+            subtract(center, this->mesh.getPoint(a), offset);
+            cross(edge, offset, product);
+            const double edgeLength2 = dot(edge, edge);
+            const double ratio = dot(offset, edge) / edgeLength2;
+            const double edgeDistance = length(product) / std::sqrt(edgeLength2);
+            if (ratio > 0.0 && ratio < 1.0 && edgeDistance < snapToEdgeTolerance * std::sqrt(edgeLength2) && edgeDistance < bestDistance)
+            {
+                bestDistance = edgeDistance;
+                location.onEdge = true;
+                location.edge[0] = a;
+                location.edge[1] = b;
+            }
+        }
+    }
     double p[3] = {center[0], center[1], center[2]};
     {
         double n[3], toPoint[3];

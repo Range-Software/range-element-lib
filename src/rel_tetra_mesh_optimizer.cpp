@@ -550,7 +550,9 @@ bool RTetraMeshOptimizer::flipEdge(int a, int b, bool delaunay)
         }
         ids.push_back(id);
     }
-    if (ids.size() < 3 || ids.size() > ((orderedRepairActive || simpleRepair) ? 8 : 10))
+    //! Largest number of cells around a removed edge, which bounds the triangulation tables below.
+    constexpr int maxRingCells = 10;
+    if (ids.size() < 3 || ids.size() > ((orderedRepairActive || simpleRepair) ? 8 : size_t(maxRingCells)))
     {
         return false;
     }
@@ -734,6 +736,12 @@ bool RTetraMeshOptimizer::flipEdge(int a, int b, bool delaunay)
     // Bottleneck dynamic programming considers all polygon triangulations,
     // including non-fan triangulations, in O(n^3) time and O(n^2) storage.
     const int n = int(cycle.size());
+    // The cycle has one vertex per cell, so this holds already. It is checked to
+    // keep the fixed size tables in bounds visibly (also for static analysis).
+    if (n < 3 || n > maxRingCells)
+    {
+        return false;
+    }
     double oldScore = 1, oldAngle = 180, oldRatio = 0, oldVolume = 0, oldSize = 0;
     double centroid[3] = {0, 0, 0};
     std::set<int> patchPoints = {a, b};
@@ -770,8 +778,9 @@ bool RTetraMeshOptimizer::flipEdge(int a, int b, bool delaunay)
         }
         return q.volume * sum;
     };
-    double best[10][10] = {}, total[10][10] = {}, energy[10][10] = {}, angles[10][10] = {};
-    int split[10][10];
+    double best[maxRingCells][maxRingCells] = {}, total[maxRingCells][maxRingCells] = {};
+    double energy[maxRingCells][maxRingCells] = {}, angles[maxRingCells][maxRingCells] = {};
+    int split[maxRingCells][maxRingCells];
     for (int i = 0; i < n; i++)
     {
         for (int j = 0; j < n; j++)
@@ -2117,200 +2126,195 @@ unsigned int RTetraMeshOptimizer::optimize(bool smoothVertices)
     RLogger::info("Optimizing mesh: preparing bounded patch repairs\n");
     remeshAttempts = compoundAttempts = boundaryAttempts = 0;
     // Ordered repair already restored Delaunayness and quality. The finishing
-    // queue must not run another Delaunay stage which can undo sliver repairs.
-    for (int stage = 1; stage < 2; stage++)
+    // queue must not run another Delaunay stage which can undo sliver repairs,
+    // so it uses quality flips only and is limited to region tetrahedra.
+    std::priority_queue<Candidate> queue;
+    std::unordered_map<std::array<int, 4>, int, KeyHash> pending;
+    std::unordered_map<std::array<int, 4>, unsigned int, KeyHash> visits;
+    std::vector<unsigned int> vertexVisits(size_t(mesh.getNPoints()), 0);
+    std::vector<size_t> vertexAttemptStamp(size_t(mesh.getNPoints()), 0);
+    auto enqueue = [&](int id)
     {
-        std::priority_queue<Candidate> queue;
-        std::unordered_map<std::array<int, 4>, int, KeyHash> pending;
-        std::unordered_map<std::array<int, 4>, unsigned int, KeyHash> visits;
-        std::vector<unsigned int> vertexVisits(size_t(mesh.getNPoints()), 0);
-        std::vector<size_t> vertexAttemptStamp(size_t(mesh.getNPoints()), 0);
-        auto enqueue = [&](int id)
+        if (id < 0 || !mesh.isAlive(id) || mesh.isGhost(id) || mesh.getTetra(id).region < 0)
         {
-            if (id < 0 || !mesh.isAlive(id) || mesh.isGhost(id) || (stage == 1 && mesh.getTetra(id).region < 0))
-            {
-                return;
-            }
-            const auto &t = mesh.getTetra(id);
-            std::array<int, 4> key = {t.v[0], t.v[1], t.v[2], t.v[3]};
-            std::sort(key.begin(), key.end());
-            if (visits[key] >= 8)
-            {
-                return;
-            }
-            auto queued = pending.find(key);
-            if (queued != pending.end() && queued->second == id)
-            {
-                return;
-            }
-            pending[key] = id;
-            const auto q = element(mesh, boundary, t.v);
-            if (stage == 1 && q.radiusEdge <= options.getRadiusEdgeRatio() && q.minFreeAngle >= std::max(10.0, options.getMinDihedralAngle()) && q.scaledVolume >= 1e-12)
-            {
-                pending.erase(key);
-                return;
-            }
-            queue.push({q.minFreeAngle < 1 ? 100 + (1 - q.minFreeAngle) : -objectiveScore(q), id, key});
-        };
-        for (int id = 0; id < mesh.getNTetraSlots(); id++)
-        {
-            enqueue(id);
+            return;
         }
-        const size_t budget = queue.size() * (stage == 0 ? 4 : 8) + 64;
-        size_t processed = 0;
-
-
-        RProgressInitialize(QString("Optimizing mesh: %1 patches visited, %2 queued")
-                                .arg(qulonglong(processed))
-                                .arg(qulonglong(queue.size())));
-
-        while (!queue.empty() && processed < budget)
+        const auto &t = mesh.getTetra(id);
+        std::array<int, 4> key = {t.v[0], t.v[1], t.v[2], t.v[3]};
+        std::sort(key.begin(), key.end());
+        if (visits[key] >= 8)
         {
-            RProgressPrint(0.0);
-            const auto entry = queue.top();
-            queue.pop();
-            auto queued = pending.find(entry.vertices);
-            if (queued == pending.end() || queued->second != entry.id)
-            {
-                continue;
-            }
-            pending.erase(queued);
-            if (!mesh.isAlive(entry.id) || mesh.isGhost(entry.id))
-            {
-                continue;
-            }
-            const auto t = mesh.getTetra(entry.id);
-            auto key = std::array<int, 4>{t.v[0], t.v[1], t.v[2], t.v[3]};
-            std::sort(key.begin(), key.end());
-            if (key != entry.vertices || visits[key] >= 8)
-            {
-                continue;
-            }
-            visits[key]++;
-            processed++;
-            queueVisits++;
-            const auto q = element(mesh, boundary, t.v);
-            if (stage == 1 && q.radiusEdge <= options.getRadiusEdgeRatio() && q.minFreeAngle >= std::max(10.0, options.getMinDihedralAngle()) && q.scaledVolume >= 1e-12)
-            {
-                continue;
-            }
-            const auto previous = rejected;
-            changed.clear();
-            bool repaired = false;
-            for (int i = 0; i < 4 && !repaired; i++)
-            {
-                const int *f = RTetraMesh::faceVertices[i];
-                repaired = flipFace(t.v[f[0]], t.v[f[1]], t.v[f[2]], stage == 0);
-            }
-            for (int i = 0; i < 6 && !repaired; i++)
-            {
-                repaired = flipEdge(t.v[RTetraMesh::edgeVertices[i][0]], t.v[RTetraMesh::edgeVertices[i][1]], stage == 0);
-            }
-            if (!repaired && stage == 1 && q.scaledVolume < 1e-12)
-            {
-                repaired = compoundFlip(entry.id);
-                if (!repaired)
-                {
-                    repaired = remeshPatch(entry.id);
-                }
-            }
-            if (!repaired && stage == 1 && smoothVertices)
-            {
-                vertexVisits.resize(size_t(mesh.getNPoints()), 0);
-                vertexAttemptStamp.resize(size_t(mesh.getNPoints()), 0);
-                for (int v : t.v)
-                {
-                    if (vertexVisits[size_t(v)] >= 8 || boundary.getVertexType(v) != RBoundaryRecovery::VertexVolume || boundary.isBoundaryVertex(v))
-                    {
-                        continue;
-                    }
-                    std::vector<int> star;
-                    findStar(v, star);
-                    size_t stamp = 1;
-                    for (int cell : star)
-                    {
-                        for (int point : mesh.getTetra(cell).v)
-                        {
-                            if (point >= 0)
-                            {
-                                stamp = std::max(stamp, vertexRevision[size_t(point)]);
-                            }
-                        }
-                    }
-                    if (vertexAttemptStamp[size_t(v)] == stamp)
-                    {
-                        profile.queueSkips++;
-                        continue;
-                    }
-                    vertexVisits[size_t(v)]++;
-                    const bool moved = relocate(v);
-                    vertexAttemptStamp[size_t(v)] = moved ? revision : stamp;
-                    if (moved)
-                    {
-                        repaired = true;
-                        break;
-                    }
-                }
-                if (!repaired && (q.minFreeAngle < 1.0 || q.radiusEdge > 10.0))
-                {
-                    repaired = compoundFlip(entry.id);
-                }
-                if (!repaired && (q.minFreeAngle < 1.0 || q.radiusEdge > 10.0))
-                {
-                    repaired = remeshPatch(entry.id);
-                }
-                if (!repaired && q.minFreeAngle < 1.0)
-                {
-                    repaired = boundaryPatch(entry.id);
-                }
-                if (!repaired && (q.minFreeAngle < 5.0 || q.radiusEdge > std::max(3.0, 2.0 * options.getRadiusEdgeRatio())))
-                {
-                    repaired = placePoint(entry.id);
-                }
-            }
-            auto &record = attempts[key];
-            record.vertices = key;
-            record.visits++;
-            record.accepted += repaired;
-            record.boundary += rejected.boundary - previous.boundary;
-            record.region += rejected.region - previous.region;
-            record.topology += rejected.topology - previous.topology;
-            record.quality += rejected.quality - previous.quality;
-            record.spacing += rejected.spacing - previous.spacing;
-            record.placement += rejected.placement - previous.placement;
+            return;
+        }
+        auto queued = pending.find(key);
+        if (queued != pending.end() && queued->second == id)
+        {
+            return;
+        }
+        pending[key] = id;
+        const auto q = element(mesh, boundary, t.v);
+        if (q.radiusEdge <= options.getRadiusEdgeRatio() && q.minFreeAngle >= std::max(10.0, options.getMinDihedralAngle()) && q.scaledVolume >= 1e-12)
+        {
+            pending.erase(key);
+            return;
+        }
+        queue.push({q.minFreeAngle < 1 ? 100 + (1 - q.minFreeAngle) : -objectiveScore(q), id, key});
+    };
+    for (int id = 0; id < mesh.getNTetraSlots(); id++)
+    {
+        enqueue(id);
+    }
+    const size_t budget = queue.size() * 8 + 64;
+    size_t processed = 0;
+
+    RProgressInitialize("Optimizing mesh: repairing remaining bad elements", true);
+
+    while (!queue.empty() && processed < budget)
+    {
+        RProgressPrint(0.0);
+        const auto entry = queue.top();
+        queue.pop();
+        auto queued = pending.find(entry.vertices);
+        if (queued == pending.end() || queued->second != entry.id)
+        {
+            continue;
+        }
+        pending.erase(queued);
+        if (!mesh.isAlive(entry.id) || mesh.isGhost(entry.id))
+        {
+            continue;
+        }
+        const auto t = mesh.getTetra(entry.id);
+        auto key = std::array<int, 4>{t.v[0], t.v[1], t.v[2], t.v[3]};
+        std::sort(key.begin(), key.end());
+        if (key != entry.vertices || visits[key] >= 8)
+        {
+            continue;
+        }
+        visits[key]++;
+        processed++;
+        queueVisits++;
+        const auto q = element(mesh, boundary, t.v);
+        if (q.radiusEdge <= options.getRadiusEdgeRatio() && q.minFreeAngle >= std::max(10.0, options.getMinDihedralAngle()) && q.scaledVolume >= 1e-12)
+        {
+            continue;
+        }
+        const auto previous = rejected;
+        changed.clear();
+        bool repaired = false;
+        for (int i = 0; i < 4 && !repaired; i++)
+        {
+            const int *f = RTetraMesh::faceVertices[i];
+            repaired = flipFace(t.v[f[0]], t.v[f[1]], t.v[f[2]], false);
+        }
+        for (int i = 0; i < 6 && !repaired; i++)
+        {
+            repaired = flipEdge(t.v[RTetraMesh::edgeVertices[i][0]], t.v[RTetraMesh::edgeVertices[i][1]], false);
+        }
+        if (!repaired && q.scaledVolume < 1e-12)
+        {
+            repaired = compoundFlip(entry.id);
             if (!repaired)
             {
-                continue;
+                repaired = remeshPatch(entry.id);
             }
-            changes++;
-            // Edge-link legality can change beyond the face neighbors. Revisit
-            // the complete vertex neighborhood, with canonical-cell deduplication.
-            std::set<int> affected;
-            for (int id : changed)
+        }
+        if (!repaired && smoothVertices)
+        {
+            vertexVisits.resize(size_t(mesh.getNPoints()), 0);
+            vertexAttemptStamp.resize(size_t(mesh.getNPoints()), 0);
+            for (int v : t.v)
             {
-                if (mesh.isAlive(id))
+                if (vertexVisits[size_t(v)] >= 8 || boundary.getVertexType(v) != RBoundaryRecovery::VertexVolume || boundary.isBoundaryVertex(v))
                 {
-                    for (int v : mesh.getTetra(id).v)
+                    continue;
+                }
+                std::vector<int> star;
+                findStar(v, star);
+                size_t stamp = 1;
+                for (int cell : star)
+                {
+                    for (int point : mesh.getTetra(cell).v)
                     {
-                        affected.insert(v);
+                        if (point >= 0)
+                        {
+                            stamp = std::max(stamp, vertexRevision[size_t(point)]);
+                        }
                     }
                 }
-            }
-            std::vector<int> star;
-            for (int v : affected)
-            {
-                findStar(v, star);
-                for (int id : star)
+                if (vertexAttemptStamp[size_t(v)] == stamp)
                 {
-                    enqueue(id);
+                    profile.queueSkips++;
+                    continue;
+                }
+                vertexVisits[size_t(v)]++;
+                const bool moved = relocate(v);
+                vertexAttemptStamp[size_t(v)] = moved ? revision : stamp;
+                if (moved)
+                {
+                    repaired = true;
+                    break;
+                }
+            }
+            if (!repaired && (q.minFreeAngle < 1.0 || q.radiusEdge > 10.0))
+            {
+                repaired = compoundFlip(entry.id);
+            }
+            if (!repaired && (q.minFreeAngle < 1.0 || q.radiusEdge > 10.0))
+            {
+                repaired = remeshPatch(entry.id);
+            }
+            if (!repaired && q.minFreeAngle < 1.0)
+            {
+                repaired = boundaryPatch(entry.id);
+            }
+            if (!repaired && (q.minFreeAngle < 5.0 || q.radiusEdge > std::max(3.0, 2.0 * options.getRadiusEdgeRatio())))
+            {
+                repaired = placePoint(entry.id);
+            }
+        }
+        auto &record = attempts[key];
+        record.vertices = key;
+        record.visits++;
+        record.accepted += repaired;
+        record.boundary += rejected.boundary - previous.boundary;
+        record.region += rejected.region - previous.region;
+        record.topology += rejected.topology - previous.topology;
+        record.quality += rejected.quality - previous.quality;
+        record.spacing += rejected.spacing - previous.spacing;
+        record.placement += rejected.placement - previous.placement;
+        if (!repaired)
+        {
+            continue;
+        }
+        changes++;
+        // Edge-link legality can change beyond the face neighbors. Revisit
+        // the complete vertex neighborhood, with canonical-cell deduplication.
+        std::set<int> affected;
+        for (int id : changed)
+        {
+            if (mesh.isAlive(id))
+            {
+                for (int v : mesh.getTetra(id).v)
+                {
+                    affected.insert(v);
                 }
             }
         }
-        RProgressFinalize();
-        if (!queue.empty())
+        std::vector<int> star;
+        for (int v : affected)
         {
-            budgetStops++;
+            findStar(v, star);
+            for (int id : star)
+            {
+                enqueue(id);
+            }
         }
+    }
+    RProgressFinalize();
+    if (!queue.empty())
+    {
+        budgetStops++;
     }
     return changes;
 }

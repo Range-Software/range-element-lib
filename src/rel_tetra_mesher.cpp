@@ -180,28 +180,27 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
 
 void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions &options, RTetraMeshData &output, RTetraMeshProfile *resultProfile)
 {
-    RLogger::info("Preparing volume mesh\n");
-    RLogger::indent();
-
     RTetraMeshProfile profile;
     RTetraMeshProfile::Timer totalTimer(profile.total);
     const std::vector<RTetraMeshData::Node> &rInputNodes = input.getNodes();
     const int nInputNodes = int(rInputNodes.size());
     const bool reconstruct = options.getReconstruct() && !input.getTetrahedra().empty();
 
+    // Input is validated before the log block is opened, so that an invalid input does not leave an empty one.
     validateInput(input, reconstruct);
 
     if (options.getElementOrder() != 1 && options.getElementOrder() != 2)
     {
-        RLogger::unindent();
         throw RError(RError::Type::InvalidInput, R_ERROR_REF, "Order of generated elements must be 1 or 2 (%d).", options.getElementOrder());
     }
 
     if (input.getTriangles().empty() && !reconstruct)
     {
-        RLogger::unindent();
         throw RError(RError::Type::InvalidInput, R_ERROR_REF, "There are no triangles to generate tetrahedra from.");
     }
+
+    RLogger::info("Preparing volume mesh\n");
+    RLogger::indent();
 
     // Delaunay tetrahedralization of input nodes.
 
@@ -344,7 +343,7 @@ void RTetraMesher::generate(const RTetraMeshData &input, const RTetraMeshOptions
                       static_cast<unsigned long long>(boundary.getNSteinerVertices(RBoundaryRecovery::VertexFacet)));
     }
 
-    RLogger::info("Classifying mesh regions");
+    RLogger::info("Classifying mesh regions\n");
     int nRegions = boundary.classifyRegions();
     if (nRegions == 0)
     {
